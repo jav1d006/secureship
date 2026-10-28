@@ -9,7 +9,8 @@ metadata:
   name: secureship-data
   namespace: secureship
 spec:
-  accessModes: [ReadWriteOnce]
+  accessModes:
+  - ReadWriteOnce
   storageClassName: local-path
   resources:
     requests:
@@ -21,53 +22,76 @@ metadata:
   name: backend
   namespace: secureship
 spec:
-  replicas: 1            # SQLite = single writer
+  replicas: 1
   strategy:
-    type: Recreate       # RWO volume, never two pods at once
+    type: Recreate
   selector:
-    matchLabels: {app: backend}
+    matchLabels:
+      app: backend
   template:
     metadata:
-      labels: {app: backend}
+      labels:
+        app: backend
     spec:
       nodeSelector:
-        kubernetes.io/hostname: node1   # node2 has only 1.6 GB RAM
+        kubernetes.io/hostname: node1
       securityContext:
         runAsNonRoot: true
         runAsUser: 10001
         fsGroup: 10001
-        seccompProfile: {type: RuntimeDefault}
+        seccompProfile:
+          type: RuntimeDefault
       containers:
-        - name: backend
-          image: ghcr.io/jav1d006/secureship-backend:latest
-          imagePullPolicy: Always
-          ports:
-            - containerPort: 8000
-          env:
-            - {name: CORS_ORIGINS, value: "http://secureship.local"}
-          resources:
-            requests: {cpu: 100m, memory: 128Mi}
-            limits: {cpu: 500m, memory: 384Mi}
-          securityContext:
-            allowPrivilegeEscalation: false
-            readOnlyRootFilesystem: true
-            capabilities: {drop: [ALL]}
-          readinessProbe:
-            httpGet: {path: /health, port: 8000}
-            initialDelaySeconds: 3
-            periodSeconds: 10
-          livenessProbe:
-            httpGet: {path: /health, port: 8000}
-            initialDelaySeconds: 10
-            periodSeconds: 20
-          volumeMounts:
-            - {name: data, mountPath: /data}
-            - {name: tmp, mountPath: /tmp}
-      volumes:
+      - name: backend
+        image: ghcr.io/jav1d006/secureship-backend:latest
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8000
+        env:
+        - name: CORS_ORIGINS
+          value: http://secureship.local
+        - name: REDIS_URL
+          value: redis://redis:6379/0
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 500m
+            memory: 384Mi
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 3
+          periodSeconds: 10
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 10
+          periodSeconds: 20
+        volumeMounts:
         - name: data
-          persistentVolumeClaim: {claimName: secureship-data}
+          mountPath: /data
         - name: tmp
-          emptyDir: {sizeLimit: 256Mi}
+          mountPath: /tmp
+        envFrom:
+        - secretRef:
+            name: db-secret
+      volumes:
+      - name: data
+        persistentVolumeClaim:
+          claimName: secureship-data
+      - name: tmp
+        emptyDir:
+          sizeLimit: 256Mi
 ---
 apiVersion: v1
 kind: Service
@@ -75,9 +99,11 @@ metadata:
   name: backend
   namespace: secureship
 spec:
-  selector: {app: backend}
+  selector:
+    app: backend
   ports:
-    - {port: 8000, targetPort: 8000}
+  - port: 8000
+    targetPort: 8000
 ---
 apiVersion: networking.k8s.io/v1
 kind: Ingress
@@ -85,17 +111,28 @@ metadata:
   name: secureship
   namespace: secureship
   annotations:
-    nginx.ingress.kubernetes.io/proxy-body-size: "30m"
+    nginx.ingress.kubernetes.io/proxy-body-size: 30m
 spec:
   ingressClassName: nginx
   rules:
-    - host: secureship.local
-      http:
-        paths:
-          - {path: /api, pathType: Prefix, backend: {service: {name: backend, port: {number: 8000}}}}
-          - {path: /health, pathType: Prefix, backend: {service: {name: backend, port: {number: 8000}}}}
+  - host: secureship.local
+    http:
+      paths:
+      - path: /api
+        pathType: Prefix
+        backend:
+          service:
+            name: backend
+            port:
+              number: 8000
+      - path: /health
+        pathType: Prefix
+        backend:
+          service:
+            name: backend
+            port:
+              number: 8000
 ---
-# Default deny everything in the namespace...
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -103,9 +140,10 @@ metadata:
   namespace: secureship
 spec:
   podSelector: {}
-  policyTypes: [Ingress, Egress]
+  policyTypes:
+  - Ingress
+  - Egress
 ---
-# ...then allow only: ingress-nginx -> backend:8000, and DNS out.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -113,18 +151,26 @@ metadata:
   namespace: secureship
 spec:
   podSelector:
-    matchLabels: {app: backend}
-  policyTypes: [Ingress, Egress]
+    matchLabels:
+      app: backend
+  policyTypes:
+  - Ingress
+  - Egress
   ingress:
-    - from:
-        - namespaceSelector:
-            matchLabels: {kubernetes.io/metadata.name: ingress-nginx}
-      ports:
-        - {protocol: TCP, port: 8000}
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: ingress-nginx
+    ports:
+    - protocol: TCP
+      port: 8000
   egress:
-    - to:
-        - namespaceSelector:
-            matchLabels: {kubernetes.io/metadata.name: kube-system}
-      ports:
-        - {protocol: UDP, port: 53}
-        - {protocol: TCP, port: 53}
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: kube-system
+    ports:
+    - protocol: UDP
+      port: 53
+    - protocol: TCP
+      port: 53
