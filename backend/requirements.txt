@@ -1,4 +1,5 @@
 fastapi>=0.130
+bandit>=1.8
 psycopg[binary]>=3.2
 rq>=2.0
 redis>=5.0

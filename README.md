@@ -70,3 +70,6 @@ curl -F file=@test.zip http://secureship.local/api/scans
 ## Roadmap
 
 1. Frontend (Next.js) · 2. Trivy / Semgrep / Checkov · 3. PDF report · 4. Postgres + Redis · 5. Scan Jobs per pod · 6. Argo CD, Prometheus/Grafana, k6
+
+---
+Created by **Javid Mamedov**.

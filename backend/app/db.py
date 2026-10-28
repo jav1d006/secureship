@@ -30,14 +30,15 @@ def init_db() -> None:
                 created_at TEXT NOT NULL,
                 finished_at TEXT)"""
         )
+        c.execute("ALTER TABLE scans ADD COLUMN IF NOT EXISTS scanners TEXT")
 
 
-def create_scan(filename: str, upload: bytes) -> str:
+def create_scan(filename: str, upload: bytes, scanners: list[str]) -> str:
     scan_id = uuid.uuid4().hex
     with _conn() as c:
         c.execute(
-            "INSERT INTO scans (id, filename, status, upload, created_at) VALUES (%s,%s,'queued',%s,%s)",
-            (scan_id, filename, upload, _now()),
+            "INSERT INTO scans (id, filename, status, upload, scanners, created_at) VALUES (%s,%s,'queued',%s,%s,%s)",
+            (scan_id, filename, upload, ",".join(scanners), _now()),
         )
     return scan_id
 
@@ -77,7 +78,7 @@ def set_failed(scan_id: str, error: str) -> None:
 def get_scan(scan_id: str) -> dict | None:
     with _conn() as c:
         return c.execute(
-            "SELECT id, filename, status, score, result, error, created_at, finished_at "
+            "SELECT id, filename, status, score, result, error, scanners, created_at, finished_at "
             "FROM scans WHERE id=%s", (scan_id,)
         ).fetchone()
 
@@ -102,3 +103,9 @@ def count_by_status() -> dict:
     with _conn() as c:
         rows = c.execute("SELECT status, COUNT(*) AS n FROM scans GROUP BY status").fetchall()
     return {r["status"]: r["n"] for r in rows}
+
+
+def get_scanners(scan_id: str) -> list[str]:
+    with _conn() as c:
+        r = c.execute("SELECT scanners FROM scans WHERE id=%s", (scan_id,)).fetchone()
+    return [s for s in ((r or {}).get("scanners") or "secrets").split(",") if s]

@@ -25,6 +25,6 @@ spec:
             capabilities: {drop: ["ALL"]}
           resources:
             requests: {cpu: 50m, memory: 128Mi}
-            limits: {memory: 384Mi}
+            limits: {memory: 768Mi}
           volumeMounts: [{name: tmp, mountPath: /tmp}]
       volumes: [{name: tmp, emptyDir: {}}]

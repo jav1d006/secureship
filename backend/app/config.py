@@ -18,3 +18,5 @@ REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://secureship:secureship@localhost:5432/secureship")
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+
+TRIVY_BIN = os.getenv("TRIVY_BIN", "trivy")

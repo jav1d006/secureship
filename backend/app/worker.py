@@ -56,9 +56,20 @@ def process(scan_id: str) -> None:
         safe_extract(zip_path, scan_dir / "src",
                      max_bytes=config.MAX_UNZIPPED_MB * 1024 * 1024,
                      max_files=config.MAX_FILES)
-        results = {name: run(scan_dir / "src") for name, run in SCANNERS.items()}
+        results, errors = {}, {}
+        for name in db.get_scanners(scan_id):
+            fn = SCANNERS.get(name)
+            if not fn:
+                continue
+            try:
+                results[name] = fn(scan_dir / "src")
+            except Exception as e:  # one scanner failing must not kill the others
+                log.warning("scanner %s failed: %s", name, e)
+                errors[name] = str(e)[:200]
+        if not results:
+            raise RuntimeError("; ".join(errors.values()) or "no scanners selected")
         score, per_module = overall_score(results)
-        db.set_done(scan_id, score, {"modules": per_module, **results})
+        db.set_done(scan_id, score, {"modules": per_module, "errors": errors, **results})
         db.clear_upload(scan_id)
     except UnsafeArchive as e:
         db.set_failed(scan_id, f"rejected archive: {e}")

@@ -2,12 +2,13 @@ import logging
 import re
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 from prometheus_client import CONTENT_TYPE_LATEST, Gauge, generate_latest
 
 from . import config, db, worker
+from .scanners import META, SCANNERS
 
 logging.basicConfig(level=logging.INFO)
 
@@ -50,17 +51,25 @@ def metrics():
 
 
 @app.post("/api/scans", status_code=202)
-async def create_scan(file: UploadFile = File(...)):
+async def create_scan(file: UploadFile = File(...), scanners: str = Form("secrets")):
     name = (file.filename or "upload.zip")[:200]
     if not name.lower().endswith(".zip"):
         raise HTTPException(400, "only .zip uploads are supported")
+    selected = [s for s in dict.fromkeys(x.strip() for x in scanners.split(",")) if s]
+    if not selected or any(s not in SCANNERS for s in selected):
+        raise HTTPException(400, "unknown or no scanner selected")
     limit = config.MAX_UPLOAD_MB * 1024 * 1024
     data = await file.read(limit + 1)
     if len(data) > limit:
         raise HTTPException(413, f"file exceeds {config.MAX_UPLOAD_MB} MB")
-    scan_id = db.create_scan(name, data)
+    scan_id = db.create_scan(name, data, selected)
     worker.enqueue(scan_id)
     return {"id": scan_id, "status": "queued"}
+
+
+@app.get("/api/scanners")
+def scanners_catalog():
+    return META
 
 
 @app.get("/api/scans")
