@@ -48,3 +48,29 @@ jobs:
           tags: |
             ghcr.io/jav1d006/secureship-backend:latest
             ghcr.io/jav1d006/secureship-backend:${{ github.sha }}
+  frontend:
+    runs-on: ubuntu-latest
+    permissions: {contents: read, packages: write}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/build-push-action@v6
+        with: {context: frontend, load: true, tags: "secureship-frontend:ci"}
+      - name: Trivy scan
+        run: |
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+            aquasec/trivy:0.58.0 image --severity HIGH,CRITICAL \
+            --ignore-unfixed --exit-code 1 secureship-frontend:ci
+      - if: github.ref == 'refs/heads/main'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - if: github.ref == 'refs/heads/main'
+        uses: docker/build-push-action@v6
+        with:
+          context: frontend
+          push: true
+          tags: |
+            ghcr.io/jav1d006/secureship-frontend:latest
+            ghcr.io/jav1d006/secureship-frontend:${{ github.sha }}
