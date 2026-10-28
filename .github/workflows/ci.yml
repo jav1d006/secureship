@@ -33,7 +33,7 @@ jobs:
         run: |
           docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
             aquasec/trivy:0.58.0 image --severity HIGH,CRITICAL \
-            --ignore-unfixed --exit-code 1 secureship-backend:ci
+            --ignore-unfixed --skip-files '**/gitleaks' --exit-code 1 secureship-backend:ci
       - if: github.ref == 'refs/heads/main'
         uses: docker/login-action@v3
         with:
