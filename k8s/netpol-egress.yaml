@@ -1,0 +1,17 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: allow-app-egress, namespace: secureship}
+spec:
+  podSelector:
+    matchExpressions: [{key: app, operator: In, values: [backend, worker]}]
+  policyTypes: [Egress]
+  egress:
+    - ports:                      # DNS (CoreDNS + nodelocaldns)
+        - {port: 53, protocol: UDP}
+        - {port: 53, protocol: TCP}
+    - to:
+        - podSelector:
+            matchExpressions: [{key: app, operator: In, values: [postgres, redis]}]
+      ports:
+        - {port: 5432, protocol: TCP}
+        - {port: 6379, protocol: TCP}
