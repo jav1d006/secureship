@@ -13,7 +13,7 @@ spec:
         - name: worker
           image: ghcr.io/jav1d006/secureship-backend:latest
           imagePullPolicy: Always
-          workingDir: /app
+          workingDir: /srv
           command: ["rq", "worker", "scans", "--url", "$(REDIS_URL)"]
           envFrom: [{secretRef: {name: db-secret}}]
           env:
