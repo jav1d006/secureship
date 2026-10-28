@@ -1,4 +1,3 @@
-FROM zricethezav/gitleaks:v8.30.1 AS gitleaks
 
 FROM python:3.12-slim
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 DATA_DIR=/data
@@ -7,7 +6,6 @@ WORKDIR /srv
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY --from=gitleaks /usr/bin/gitleaks /usr/local/bin/gitleaks
 COPY app ./app
 
 RUN useradd --uid 10001 --no-create-home --shell /usr/sbin/nologin app \
