@@ -11,8 +11,7 @@
 ![FastAPI](https://img.shields.io/badge/FastAPI-backend-009688?logo=fastapi&logoColor=white)
 ![Next.js](https://img.shields.io/badge/Next.js-frontend-000000?logo=nextdotjs&logoColor=white)
 
-<img src = width="1898" height="866" alt="image" src="https://github.com/user-attachments/assets/45e00b1d-8bbe-478c-a415-ab8a0093898f" />
-" alt="SecureShip home page" width="860">
+<img src="docs/screenshots/home.png" alt="SecureShip home page" width="860">
 
 </div>
 
@@ -229,9 +228,11 @@ pytest -q
 
 ## Screenshots
 
-| Pipeline | GitOps | Cluster |
-|---|---|---|
-| ![GitHub Actions](docs/screenshots/github-actions.png) | ![Argo CD](docs/screenshots/argocd.png) | ![Pods](docs/screenshots/pods.png) |
+**GitOps with Argo CD**: the whole stack (ingress, frontend, backend, worker, PostgreSQL, Redis) is `Synced` and `Healthy`, deployed automatically from this repository.
+
+<div align="center">
+<img src="docs/screenshots/argocd.png" alt="Argo CD application tree" width="900">
+</div>
 
 ## Known limitations
 
