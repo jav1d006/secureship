@@ -1,12 +1,10 @@
-"""In-process worker: one thread, one scan at a time (keeps RAM low).
-Swap for Redis/RQ later without touching the API."""
+"""Redis/RQ queue. API calls enqueue(); the `rq worker scans` process runs process()."""
 import logging
-import queue
 import shutil
-import threading
-import time
 
-from prometheus_client import Counter, Gauge, Histogram
+from redis import Redis
+from rq import Queue
+from rq.job import Job
 
 from . import config, db
 from .safezip import UnsafeArchive, safe_extract
@@ -15,62 +13,59 @@ from .scoring import overall_score
 
 log = logging.getLogger("secureship.worker")
 
-SCANS_TOTAL = Counter("secureship_scans_total", "Finished scans", ["status"])
-SCAN_SECONDS = Histogram("secureship_scan_duration_seconds", "Scan duration")
-QUEUE_LEN = Gauge("secureship_queue_length", "Scans waiting in queue")
 
-_q: "queue.Queue[str]" = queue.Queue()
-_started = False
+def _redis() -> Redis:
+    return Redis.from_url(config.REDIS_URL)
+
+
+def _queue() -> Queue:
+    return Queue("scans", connection=_redis())
 
 
 def enqueue(scan_id: str) -> None:
-    _q.put(scan_id)
-    QUEUE_LEN.set(_q.qsize())
+    _queue().enqueue(process, scan_id, job_id=scan_id, job_timeout=600,
+                     result_ttl=0, failure_ttl=0)
 
 
-def _process(scan_id: str) -> None:
-    scan_dir = config.WORK_DIR / scan_id
-    zip_path = scan_dir / "upload.zip"
-    src_dir = scan_dir / "src"
-    start = time.monotonic()
-    db.set_running(scan_id)
+def queue_len() -> int:
+    return len(_queue())
+
+
+def requeue_unfinished() -> None:
+    """Redis keeps no data on restart; re-queue scans that are still unfinished in Postgres."""
     try:
-        safe_extract(
-            zip_path, src_dir,
-            max_bytes=config.MAX_UNZIPPED_MB * 1024 * 1024,
-            max_files=config.MAX_FILES,
-        )
-        results = {name: run(src_dir) for name, run in SCANNERS.items()}
+        r = _redis()
+        for sid in db.unfinished_ids():
+            if not Job.exists(sid, connection=r):
+                enqueue(sid)
+    except Exception:
+        log.exception("requeue failed")
+
+
+def process(scan_id: str) -> None:
+    scan_dir = config.WORK_DIR / scan_id
+    try:
+        data = db.get_upload(scan_id)
+        if data is None:
+            db.set_failed(scan_id, "upload missing")
+            return
+        db.set_running(scan_id)
+        scan_dir.mkdir(parents=True, exist_ok=True)
+        zip_path = scan_dir / "upload.zip"
+        zip_path.write_bytes(data)
+        safe_extract(zip_path, scan_dir / "src",
+                     max_bytes=config.MAX_UNZIPPED_MB * 1024 * 1024,
+                     max_files=config.MAX_FILES)
+        results = {name: run(scan_dir / "src") for name, run in SCANNERS.items()}
         score, per_module = overall_score(results)
         db.set_done(scan_id, score, {"modules": per_module, **results})
-        SCANS_TOTAL.labels("done").inc()
+        db.clear_upload(scan_id)
     except UnsafeArchive as e:
         db.set_failed(scan_id, f"rejected archive: {e}")
-        SCANS_TOTAL.labels("failed").inc()
-    except Exception as e:  # scanner crash, timeout, ...
+        db.clear_upload(scan_id)
+    except Exception as e:
         log.exception("scan %s failed", scan_id)
         db.set_failed(scan_id, str(e))
-        SCANS_TOTAL.labels("failed").inc()
+        db.clear_upload(scan_id)
     finally:
-        SCAN_SECONDS.observe(time.monotonic() - start)
         shutil.rmtree(scan_dir, ignore_errors=True)  # never keep user code
-
-
-def _loop() -> None:
-    while True:
-        scan_id = _q.get()
-        QUEUE_LEN.set(_q.qsize())
-        _process(scan_id)
-
-
-def start() -> None:
-    global _started
-    if _started:
-        return
-    _started = True
-    for scan_id in db.unfinished_ids():
-        if (config.WORK_DIR / scan_id / "upload.zip").exists():
-            enqueue(scan_id)
-        else:
-            db.set_failed(scan_id, "interrupted by restart")
-    threading.Thread(target=_loop, name="scan-worker", daemon=True).start()

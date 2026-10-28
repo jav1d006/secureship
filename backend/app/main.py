@@ -1,25 +1,25 @@
 import logging
 import re
-import shutil
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
-from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
+from prometheus_client import CONTENT_TYPE_LATEST, Gauge, generate_latest
 
 from . import config, db, worker
 
 logging.basicConfig(level=logging.INFO)
 
 SCAN_ID_RE = re.compile(r"^[0-9a-f]{32}$")
+QUEUE_LEN = Gauge("secureship_queue_length", "Scans waiting in queue")
+SCANS = Gauge("secureship_scans", "Scans by status", ["status"])
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    config.WORK_DIR.mkdir(parents=True, exist_ok=True)
     db.init_db()
-    worker.start()
+    worker.requeue_unfinished()
     yield
 
 
@@ -39,6 +39,13 @@ def health():
 
 @app.get("/metrics")
 def metrics():
+    try:
+        QUEUE_LEN.set(worker.queue_len())
+    except Exception:
+        pass
+    counts = {k: 0 for k in ("queued", "running", "done", "failed")} | db.count_by_status()
+    for k, n in counts.items():
+        SCANS.labels(k).set(n)
     return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 
@@ -47,23 +54,11 @@ async def create_scan(file: UploadFile = File(...)):
     name = (file.filename or "upload.zip")[:200]
     if not name.lower().endswith(".zip"):
         raise HTTPException(400, "only .zip uploads are supported")
-
-    scan_id = db.create_scan(name)
-    scan_dir = config.WORK_DIR / scan_id
-    scan_dir.mkdir(parents=True, exist_ok=True)
-
     limit = config.MAX_UPLOAD_MB * 1024 * 1024
-    written = 0
-    with open(scan_dir / "upload.zip", "wb") as out:
-        while chunk := await file.read(64 * 1024):
-            written += len(chunk)
-            if written > limit:
-                out.close()
-                shutil.rmtree(scan_dir, ignore_errors=True)
-                db.set_failed(scan_id, "upload too large")
-                raise HTTPException(413, f"file exceeds {config.MAX_UPLOAD_MB} MB")
-            out.write(chunk)
-
+    data = await file.read(limit + 1)
+    if len(data) > limit:
+        raise HTTPException(413, f"file exceeds {config.MAX_UPLOAD_MB} MB")
+    scan_id = db.create_scan(name, data)
     worker.enqueue(scan_id)
     return {"id": scan_id, "status": "queued"}
 
