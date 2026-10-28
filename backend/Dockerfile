@@ -1,4 +1,4 @@
-FROM zricethezav/gitleaks:v8.21.2 AS gitleaks
+FROM zricethezav/gitleaks:v8.30.1 AS gitleaks
 
 FROM python:3.12-slim
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 DATA_DIR=/data
