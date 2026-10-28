@@ -11,7 +11,7 @@
 ![FastAPI](https://img.shields.io/badge/FastAPI-backend-009688?logo=fastapi&logoColor=white)
 ![Next.js](https://img.shields.io/badge/Next.js-frontend-000000?logo=nextdotjs&logoColor=white)
 
-<img src= width="1898" height="866" alt="image" src="https://github.com/user-attachments/assets/45e00b1d-8bbe-478c-a415-ab8a0093898f" />
+<img src = width="1898" height="866" alt="image" src="https://github.com/user-attachments/assets/45e00b1d-8bbe-478c-a415-ab8a0093898f" />
 " alt="SecureShip home page" width="860">
 
 </div>
