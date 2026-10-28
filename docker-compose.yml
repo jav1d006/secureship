@@ -1,0 +1,20 @@
+services:
+  backend:
+    build: ./backend
+    image: secureship-backend:dev
+    ports:
+      - "8000:8000"
+    environment:
+      CORS_ORIGINS: "http://localhost:3000"
+    volumes:
+      - secureship-data:/data
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 512m
+
+volumes:
+  secureship-data:
