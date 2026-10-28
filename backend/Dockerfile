@@ -14,11 +14,8 @@ RUN apt-get update \
     && rm -f /tmp/gitleaks.tar.gz \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
-ARG TRIVY_VERSION=0.58.0
-RUN curl -fsSL "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz" -o /tmp/trivy.tar.gz \
-    && tar -xzf /tmp/trivy.tar.gz -C /usr/local/bin trivy \
-    && chmod +x /usr/local/bin/trivy && rm -f /tmp/trivy.tar.gz \
-    && trivy image --download-db-only --cache-dir /opt/trivy-cache \
+COPY --from=aquasec/trivy:0.58.0 /usr/local/bin/trivy /usr/local/bin/trivy
+RUN trivy image --download-db-only --cache-dir /opt/trivy-cache \
     && chmod -R a+rX /opt/trivy-cache
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
