@@ -2,19 +2,21 @@ import logging
 import re
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import Response
+from fastapi.responses import JSONResponse, Response
 from prometheus_client import CONTENT_TYPE_LATEST, Gauge, generate_latest
 
 from . import config, db, worker
 from .scanners import META, SCANNERS
+from .security import client_ip, hit, limit_reads, limit_scans, new_token
 
 logging.basicConfig(level=logging.INFO)
 
 SCAN_ID_RE = re.compile(r"^[0-9a-f]{32}$")
 QUEUE_LEN = Gauge("secureship_queue_length", "Scans waiting in queue")
 SCANS = Gauge("secureship_scans", "Scans by status", ["status"])
+MAX_BODY = config.MAX_UPLOAD_MB * 1024 * 1024 + 1024 * 1024
 
 
 @asynccontextmanager
@@ -24,18 +26,46 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="SecureShip", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="SecureShip API", version="1.0.0", lifespan=lifespan,
+              docs_url="/api/docs", redoc_url=None, openapi_url="/api/openapi.json")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=config.CORS_ORIGINS,
-    allow_methods=["GET", "POST"],
-    allow_headers=["*"],
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "DELETE"],
+    allow_headers=["Content-Type", "X-API-Key"],
 )
+
+
+@app.middleware("http")
+async def harden(request: Request, call_next):
+    cl = request.headers.get("content-length")
+    if cl and cl.isdigit() and int(cl) > MAX_BODY:
+        return JSONResponse({"detail": "request too large"}, status_code=413)
+    resp = await call_next(request)
+    resp.headers["X-Content-Type-Options"] = "nosniff"
+    resp.headers["X-Frame-Options"] = "DENY"
+    resp.headers["Referrer-Policy"] = "no-referrer"
+    if not request.url.path.startswith("/api/docs"):
+        resp.headers["Content-Security-Policy"] = "default-src 'none'; frame-ancestors 'none'"
+    if request.url.path.startswith("/api/v1"):
+        resp.headers["Cache-Control"] = "no-store"
+    return resp
 
 
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+@app.get("/ready")
+def ready():
+    try:
+        db.count_by_status()
+        worker.queue_len()
+    except Exception:
+        raise HTTPException(503, "not ready")
+    return {"status": "ready"}
 
 
 @app.get("/metrics")
@@ -50,9 +80,25 @@ def metrics():
     return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 
-@app.post("/api/scans", status_code=202)
-async def create_scan(file: UploadFile = File(...), scanners: str = Form("secrets")):
-    name = (file.filename or "upload.zip")[:200]
+v1 = APIRouter(prefix="/api/v1")
+
+
+@v1.get("/scanners")
+def scanners_catalog(_: str = Depends(limit_reads)):
+    return META
+
+
+@v1.post("/keys", status_code=201)
+def create_key(request: Request):
+    hit(f"rl:k:{client_ip(request)}", 5, 3600)
+    return {"api_key": new_token(),
+            "usage": "Send it as the X-API-Key header. Store it safely; it is not shown again."}
+
+
+@v1.post("/scans", status_code=202)
+async def create_scan(file: UploadFile = File(...), scanners: str = Form("secrets"),
+                      who: str = Depends(limit_scans)):
+    name = re.sub(r"[^\w.\- ]", "_", (file.filename or "upload.zip"))[:200]
     if not name.lower().endswith(".zip"):
         raise HTTPException(400, "only .zip uploads are supported")
     selected = [s for s in dict.fromkeys(x.strip() for x in scanners.split(",")) if s]
@@ -62,26 +108,39 @@ async def create_scan(file: UploadFile = File(...), scanners: str = Form("secret
     data = await file.read(limit + 1)
     if len(data) > limit:
         raise HTTPException(413, f"file exceeds {config.MAX_UPLOAD_MB} MB")
-    scan_id = db.create_scan(name, data, selected)
+    if not data.startswith(b"PK\x03\x04"):
+        raise HTTPException(400, "file is not a valid zip archive")
+    try:
+        if worker.queue_len() >= config.MAX_QUEUE:
+            raise HTTPException(503, "scan queue is full, try again shortly")
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(503, "service temporarily unavailable")
+    scan_id = db.create_scan(name, data, selected, who)
     worker.enqueue(scan_id)
     return {"id": scan_id, "status": "queued"}
 
 
-@app.get("/api/scanners")
-def scanners_catalog():
-    return META
+@v1.get("/scans")
+def list_scans(limit: int = Query(20, ge=1, le=100), offset: int = Query(0, ge=0),
+               who: str = Depends(limit_reads)):
+    return db.list_scans_owned(who, limit, offset)
 
 
-@app.get("/api/scans")
-def list_scans():
-    return db.list_scans()
-
-
-@app.get("/api/scans/{scan_id}")
-def get_scan(scan_id: str):
-    if not SCAN_ID_RE.match(scan_id):
-        raise HTTPException(404, "scan not found")
-    scan = db.get_scan(scan_id)
+@v1.get("/scans/{scan_id}")
+def get_scan(scan_id: str, who: str = Depends(limit_reads)):
+    scan = db.get_scan_owned(scan_id, who) if SCAN_ID_RE.match(scan_id) else None
     if not scan:
         raise HTTPException(404, "scan not found")
     return scan
+
+
+@v1.delete("/scans/{scan_id}", status_code=204)
+def delete_scan(scan_id: str, who: str = Depends(limit_reads)):
+    if not SCAN_ID_RE.match(scan_id) or not db.delete_scan(scan_id, who):
+        raise HTTPException(404, "scan not found")
+    return Response(status_code=204)
+
+
+app.include_router(v1)

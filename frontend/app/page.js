@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 const SEV = ["critical", "high", "medium", "low"];
 const SEV_COLOR = { critical: "#b91c1c", high: "#ef4444", medium: "#f59e0b", low: "#3b82f6" };
-const ICON = { secrets: "🔑", dependencies: "📦", code: "🧩" };
+const ICON = { secrets: "🔑", dependencies: "📦", code: "🧩", iac: "🏗️", docker: "🐳" };
 const scoreColor = (s) => (s >= 80 ? "#22c55e" : s >= 60 ? "#84cc16" : s >= 40 ? "#f59e0b" : "#ef4444");
 const scoreLabel = (s) => (s >= 80 ? "Excellent" : s >= 60 ? "Good" : s >= 40 ? "Needs improvement" : "Poor");
 
@@ -40,7 +40,7 @@ export default function Home() {
   const input = useRef(null);
 
   useEffect(() => {
-    fetch("/api/scanners")
+    fetch("/api/v1/scanners")
       .then((r) => r.json())
       .then((d) => { setCatalog(d); setPicked(d.map((s) => s.key)); })
       .catch(() => setErr("Cannot reach the API"));
@@ -52,7 +52,7 @@ export default function Home() {
 
   async function poll(id) {
     try {
-      const d = await (await fetch(`/api/scans/${id}`)).json();
+      const d = await (await fetch(`/api/v1/scans/${id}`)).json();
       setScan(d);
       if (d.status === "done" || d.status === "failed") return setBusy(false);
       timer.current = setTimeout(() => poll(id), 1000);
@@ -69,7 +69,7 @@ export default function Home() {
     body.append("file", file);
     body.append("scanners", picked.join(","));
     try {
-      const r = await fetch("/api/scans", { method: "POST", body });
+      const r = await fetch("/api/v1/scans", { method: "POST", body });
       const d = await r.json();
       if (!r.ok) throw new Error(d.detail || "Upload failed");
       setScan({ status: "queued", filename: file.name });

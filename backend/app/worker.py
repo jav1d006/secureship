@@ -1,5 +1,6 @@
 """Redis/RQ queue. API calls enqueue(); the `rq worker scans` process runs process()."""
 import logging
+import os
 import shutil
 
 from redis import Redis
@@ -42,7 +43,22 @@ def requeue_unfinished() -> None:
         log.exception("requeue failed")
 
 
+def harden_tree(root) -> None:
+    """Defence in depth: no symlinks, no exec/setuid bits, owner-only permissions."""
+    for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
+        for name in dirnames + filenames:
+            p = os.path.join(dirpath, name)
+            if os.path.islink(p):
+                os.unlink(p)
+        os.chmod(dirpath, 0o700)
+        for name in filenames:
+            p = os.path.join(dirpath, name)
+            if os.path.isfile(p) and not os.path.islink(p):
+                os.chmod(p, 0o600)
+
+
 def process(scan_id: str) -> None:
+    os.umask(0o077)
     scan_dir = config.WORK_DIR / scan_id
     try:
         data = db.get_upload(scan_id)
@@ -50,12 +66,13 @@ def process(scan_id: str) -> None:
             db.set_failed(scan_id, "upload missing")
             return
         db.set_running(scan_id)
-        scan_dir.mkdir(parents=True, exist_ok=True)
+        scan_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
         zip_path = scan_dir / "upload.zip"
         zip_path.write_bytes(data)
         safe_extract(zip_path, scan_dir / "src",
                      max_bytes=config.MAX_UNZIPPED_MB * 1024 * 1024,
                      max_files=config.MAX_FILES)
+        harden_tree(scan_dir / "src")
         results, errors = {}, {}
         for name in db.get_scanners(scan_id):
             fn = SCANNERS.get(name)

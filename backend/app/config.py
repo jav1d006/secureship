@@ -20,3 +20,9 @@ DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://secureship:secureship@loc
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 
 TRIVY_BIN = os.getenv("TRIVY_BIN", "trivy")
+
+RATE_SCANS_PER_HOUR = int(os.getenv("RATE_SCANS_PER_HOUR", "10"))
+RATE_SCANS_PER_HOUR_IP = int(os.getenv("RATE_SCANS_PER_HOUR_IP", "30"))
+RATE_READS_PER_MIN = int(os.getenv("RATE_READS_PER_MIN", "240"))
+MAX_QUEUE = int(os.getenv("MAX_QUEUE", "50"))
+COOKIE_SECURE = os.getenv("COOKIE_SECURE", "false").lower() == "true"
