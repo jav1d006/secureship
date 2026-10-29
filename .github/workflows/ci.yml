@@ -27,7 +27,7 @@ jobs:
     permissions: {contents: read, packages: write}
     steps:
       - uses: actions/checkout@v4
-      - uses: docker/build-push-action@v6
+      - uses: docker/build-push-action@v7
         with: {context: backend, load: true, tags: "secureship-backend:ci"}
       - name: Trivy scan
         run: |
@@ -41,7 +41,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - if: github.ref == 'refs/heads/main'
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: backend
           push: true
@@ -53,7 +53,7 @@ jobs:
     permissions: {contents: read, packages: write}
     steps:
       - uses: actions/checkout@v4
-      - uses: docker/build-push-action@v6
+      - uses: docker/build-push-action@v7
         with: {context: frontend, load: true, tags: "secureship-frontend:ci"}
       - name: Trivy scan
         run: |
@@ -67,7 +67,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - if: github.ref == 'refs/heads/main'
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: frontend
           push: true
