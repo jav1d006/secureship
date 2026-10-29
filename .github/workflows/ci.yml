@@ -35,7 +35,7 @@ jobs:
             aquasec/trivy:0.58.0 image --severity HIGH,CRITICAL \
             --ignore-unfixed --skip-files '**/gitleaks' --skip-files '**/trivy' --skip-dirs '**/trivy-cache' --exit-code 1 secureship-backend:ci
       - if: github.ref == 'refs/heads/main'
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -61,7 +61,7 @@ jobs:
             aquasec/trivy:0.58.0 image --severity HIGH,CRITICAL \
             --ignore-unfixed --exit-code 1 secureship-frontend:ci
       - if: github.ref == 'refs/heads/main'
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
