@@ -9,7 +9,7 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-python@v5
         with: {python-version: "3.12"}
       - run: pip install -r backend/requirements-dev.txt
@@ -17,7 +17,7 @@ jobs:
   secrets:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with: {fetch-depth: 0}
       - uses: gitleaks/gitleaks-action@v2
         env: {GITHUB_TOKEN: "${{ secrets.GITHUB_TOKEN }}"}
@@ -26,7 +26,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions: {contents: read, packages: write}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: docker/build-push-action@v6
         with: {context: backend, load: true, tags: "secureship-backend:ci"}
       - name: Trivy scan
@@ -52,7 +52,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions: {contents: read, packages: write}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: docker/build-push-action@v6
         with: {context: frontend, load: true, tags: "secureship-frontend:ci"}
       - name: Trivy scan
