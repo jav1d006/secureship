@@ -31,14 +31,16 @@ def init_db() -> None:
                 finished_at TEXT)"""
         )
         c.execute("ALTER TABLE scans ADD COLUMN IF NOT EXISTS scanners TEXT")
+        c.execute("ALTER TABLE scans ADD COLUMN IF NOT EXISTS owner TEXT")
+        c.execute("CREATE INDEX IF NOT EXISTS scans_owner_created ON scans (owner, created_at DESC)")
 
 
-def create_scan(filename: str, upload: bytes, scanners: list[str]) -> str:
+def create_scan(filename: str, upload: bytes, scanners: list[str], owner: str) -> str:
     scan_id = uuid.uuid4().hex
     with _conn() as c:
         c.execute(
-            "INSERT INTO scans (id, filename, status, upload, scanners, created_at) VALUES (%s,%s,'queued',%s,%s,%s)",
-            (scan_id, filename, upload, ",".join(scanners), _now()),
+            "INSERT INTO scans (id, filename, status, upload, scanners, owner, created_at) VALUES (%s,%s,'queued',%s,%s,%s,%s)",
+            (scan_id, filename, upload, ",".join(scanners), owner, _now()),
         )
     return scan_id
 
@@ -109,3 +111,26 @@ def get_scanners(scan_id: str) -> list[str]:
     with _conn() as c:
         r = c.execute("SELECT scanners FROM scans WHERE id=%s", (scan_id,)).fetchone()
     return [s for s in ((r or {}).get("scanners") or "secrets").split(",") if s]
+
+
+def get_scan_owned(scan_id: str, owner: str) -> dict | None:
+    with _conn() as c:
+        return c.execute(
+            "SELECT id, filename, status, score, result, error, scanners, created_at, finished_at "
+            "FROM scans WHERE id=%s AND owner=%s", (scan_id, owner)
+        ).fetchone()
+
+
+def list_scans_owned(owner: str, limit: int, offset: int) -> list[dict]:
+    with _conn() as c:
+        return c.execute(
+            "SELECT id, filename, status, score, scanners, created_at, finished_at "
+            "FROM scans WHERE owner=%s ORDER BY created_at DESC LIMIT %s OFFSET %s",
+            (owner, limit, offset),
+        ).fetchall()
+
+
+def delete_scan(scan_id: str, owner: str) -> bool:
+    with _conn() as c:
+        return c.execute("DELETE FROM scans WHERE id=%s AND owner=%s RETURNING id",
+                         (scan_id, owner)).fetchone() is not None
