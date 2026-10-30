@@ -1,7 +1,28 @@
 version: 2
+# One grouped PR per ecosystem per week instead of one branch per package.
 updates:
-  - {package-ecosystem: pip, directory: /backend, schedule: {interval: weekly}}
-  - {package-ecosystem: npm, directory: /frontend, schedule: {interval: weekly}}
-  - {package-ecosystem: docker, directory: /backend, schedule: {interval: weekly}}
-  - {package-ecosystem: docker, directory: /frontend, schedule: {interval: weekly}}
-  - {package-ecosystem: github-actions, directory: /, schedule: {interval: weekly}}
+  - package-ecosystem: pip
+    directory: /backend
+    schedule: {interval: weekly}
+    open-pull-requests-limit: 1
+    groups: {python: {patterns: ["*"]}}
+  - package-ecosystem: npm
+    directory: /frontend
+    schedule: {interval: weekly}
+    open-pull-requests-limit: 1
+    groups: {npm: {patterns: ["*"]}}
+  - package-ecosystem: docker
+    directory: /backend
+    schedule: {interval: weekly}
+    open-pull-requests-limit: 1
+    groups: {docker-backend: {patterns: ["*"]}}
+  - package-ecosystem: docker
+    directory: /frontend
+    schedule: {interval: weekly}
+    open-pull-requests-limit: 1
+    groups: {docker-frontend: {patterns: ["*"]}}
+  - package-ecosystem: github-actions
+    directory: /
+    schedule: {interval: weekly}
+    open-pull-requests-limit: 1
+    groups: {actions: {patterns: ["*"]}}
