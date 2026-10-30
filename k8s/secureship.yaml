@@ -154,6 +154,13 @@ spec:
     ports:
     - protocol: TCP
       port: 8000
+  - from:
+    - podSelector:
+        matchLabels:
+          app: prometheus
+    ports:
+    - protocol: TCP
+      port: 8000
   egress:
   - to:
     - namespaceSelector:

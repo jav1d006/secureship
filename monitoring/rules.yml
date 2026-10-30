@@ -1,0 +1,70 @@
+groups:
+  - name: secureship
+    rules:
+      - alert: BackendDown
+        expr: up{job="secureship-backend"} == 0
+        for: 2m
+        labels: {severity: critical}
+        annotations:
+          summary: "SecureShip API is not scrapeable"
+          description: "Prometheus cannot reach backend:8000/metrics for 2 minutes."
+
+      - alert: DependencyDown
+        expr: secureship_dependency_up == 0
+        for: 2m
+        labels: {severity: critical}
+        annotations:
+          summary: "{{ $labels.dependency }} is unreachable from the API"
+          description: "Scans cannot be created or finished while this is down."
+
+      - alert: ScanQueueBacklog
+        expr: secureship_queue_length > 30
+        for: 10m
+        labels: {severity: warning}
+        annotations:
+          summary: "More than 30 scans are waiting"
+          description: "The queue holds {{ $value }} scans (limit MAX_QUEUE=50, then new scans get 503)."
+
+      - alert: WorkerNotProcessing
+        expr: secureship_oldest_queued_seconds > 600
+        for: 5m
+        labels: {severity: critical}
+        annotations:
+          summary: "The oldest queued scan has waited over 10 minutes"
+          description: "The worker is probably down, crash-looping or out of memory (OOMKilled)."
+
+      - alert: HighScanFailureRate
+        expr: |
+          sum(secureship_scans_finished_last_hour{status="failed"}) / sum(secureship_scans_finished_last_hour) > 0.3
+          and on()
+          sum(secureship_scans_finished_last_hour) >= 5
+        for: 15m
+        labels: {severity: warning}
+        annotations:
+          summary: "More than 30% of scans failed in the last hour"
+          description: "Check worker logs and the per-scanner `errors` in failing results."
+
+      - alert: SlowScans
+        expr: secureship_scan_duration_seconds_avg > 120
+        for: 15m
+        labels: {severity: warning}
+        annotations:
+          summary: "Average scan takes over 2 minutes"
+          description: "Close to SCAN_TIMEOUT_SEC; consider more worker CPU/memory."
+
+      - alert: HighErrorRate
+        expr: |
+          sum(rate(secureship_http_requests_total{status=~"5.."}[5m]))
+          / clamp_min(sum(rate(secureship_http_requests_total[5m])), 0.001) > 0.05
+        for: 10m
+        labels: {severity: warning}
+        annotations:
+          summary: "More than 5% of API responses are 5xx"
+
+      - alert: HighLatencyP95
+        expr: |
+          histogram_quantile(0.95, sum by (le, route) (rate(secureship_http_request_seconds_bucket[5m]))) > 2
+        for: 10m
+        labels: {severity: warning}
+        annotations:
+          summary: "p95 latency above 2s on {{ $labels.route }}"

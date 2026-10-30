@@ -19,6 +19,10 @@ log = logging.getLogger("secureship.api")
 SCAN_ID_RE = re.compile(r"^[0-9a-f]{32}$")
 QUEUE_LEN = Gauge("secureship_queue_length", "Scans waiting in queue")
 SCANS = Gauge("secureship_scans", "Scans by status", ["status"])
+DEP_UP = Gauge("secureship_dependency_up", "1 if the dependency answered", ["dependency"])
+OLDEST_QUEUED = Gauge("secureship_oldest_queued_seconds", "Age of the oldest queued scan")
+FINISHED_1H = Gauge("secureship_scans_finished_last_hour", "Scans finished in the last hour", ["status"])
+SCAN_SECONDS = Gauge("secureship_scan_duration_seconds_avg", "Average duration of scans finished in the last hour")
 HTTP_REQS = Counter("secureship_http_requests_total", "HTTP requests", ["method", "route", "status"])
 HTTP_LAT = Histogram("secureship_http_request_seconds", "HTTP request latency", ["route"])
 MAX_BODY = config.MAX_UPLOAD_MB * 1024 * 1024 + 1024 * 1024
@@ -92,13 +96,24 @@ def ready():
 
 @app.get("/metrics")
 def metrics():
+    """Never fails: a broken dependency shows up as secureship_dependency_up 0, not as a 500."""
     try:
         QUEUE_LEN.set(worker.queue_len())
+        DEP_UP.labels("redis").set(1)
     except Exception:
-        pass
-    counts = {k: 0 for k in ("queued", "running", "done", "failed")} | db.count_by_status()
-    for k, n in counts.items():
-        SCANS.labels(k).set(n)
+        DEP_UP.labels("redis").set(0)
+    try:
+        counts = {k: 0 for k in ("queued", "running", "done", "failed")} | db.count_by_status()
+        for k, n in counts.items():
+            SCANS.labels(k).set(n)
+        st = db.stats()
+        OLDEST_QUEUED.set(st["oldest_queued"])
+        FINISHED_1H.labels("done").set(st["done_1h"])
+        FINISHED_1H.labels("failed").set(st["failed_1h"])
+        SCAN_SECONDS.set(st["avg_duration"])
+        DEP_UP.labels("postgres").set(1)
+    except Exception:
+        DEP_UP.labels("postgres").set(0)
     return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 

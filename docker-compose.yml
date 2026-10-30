@@ -56,5 +56,39 @@ services:
     <<: *hardened
     tmpfs: [/data]
 
+  # Optional monitoring stack: docker compose --profile monitoring up
+  #   Prometheus http://localhost:9090   Grafana http://localhost:3001 (admin / dev-only)
+  prometheus:
+    <<: *hardened
+    profiles: [monitoring]
+    image: prom/prometheus:v2.55.1
+    command: ["--config.file=/etc/prometheus/prometheus.yml", "--storage.tsdb.path=/prometheus",
+              "--storage.tsdb.retention.time=2d"]
+    ports: ["127.0.0.1:9090:9090"]
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/rules.yml:/etc/prometheus/rules.yml:ro
+    tmpfs: ["/prometheus:uid=65534,gid=65534"]
+    user: "65534:65534"
+    depends_on: [backend]
+  grafana:
+    <<: *hardened
+    profiles: [monitoring]
+    image: grafana/grafana:11.3.0
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: dev-only
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      GF_LOG_MODE: console
+    ports: ["127.0.0.1:3001:3000"]
+    volumes:
+      - ./monitoring/grafana/datasource.yml:/etc/grafana/provisioning/datasources/datasource.yml:ro
+      - ./monitoring/grafana/dashboards.yml:/etc/grafana/provisioning/dashboards/dashboards.yml:ro
+      - ./monitoring/grafana/dashboards:/etc/grafana/dashboards:ro
+    tmpfs: ["/var/lib/grafana:uid=472,gid=472", "/tmp"]
+    user: "472:472"
+    depends_on: [prometheus]
+
 volumes:
   pgdata:
