@@ -1,0 +1,49 @@
+rule_files: [rules.yml]
+evaluation_interval: 1m
+tests:
+  - name: worker not processing fires after 5m above 10 minutes
+    interval: 1m
+    input_series:
+      - {series: 'secureship_oldest_queued_seconds', values: '700+0x10'}
+    alert_rule_test:
+      - {eval_time: 3m, alertname: WorkerNotProcessing, exp_alerts: []}
+      - eval_time: 7m
+        alertname: WorkerNotProcessing
+        exp_alerts:
+          - exp_labels: {severity: critical}
+            exp_annotations:
+              summary: "The oldest queued scan has waited over 10 minutes"
+              description: "The worker is probably down, crash-looping or out of memory (OOMKilled)."
+  - name: healthy system raises nothing
+    interval: 1m
+    input_series:
+      - {series: 'up{job="secureship-backend"}', values: '1+0x30'}
+      - {series: 'secureship_dependency_up{dependency="redis"}', values: '1+0x30'}
+      - {series: 'secureship_oldest_queued_seconds', values: '0+0x30'}
+      - {series: 'secureship_queue_length', values: '2+0x30'}
+    alert_rule_test:
+      - {eval_time: 20m, alertname: BackendDown, exp_alerts: []}
+      - {eval_time: 20m, alertname: DependencyDown, exp_alerts: []}
+      - {eval_time: 20m, alertname: ScanQueueBacklog, exp_alerts: []}
+  - name: backend down and failure rate
+    interval: 1m
+    input_series:
+      - {series: 'up{job="secureship-backend"}', values: '0+0x10'}
+      - {series: 'secureship_scans_finished_last_hour{status="failed"}', values: '6+0x30'}
+      - {series: 'secureship_scans_finished_last_hour{status="done"}', values: '4+0x30'}
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: BackendDown
+        exp_alerts:
+          - exp_labels: {severity: critical, job: secureship-backend}
+            exp_annotations:
+              summary: "SecureShip API is not scrapeable"
+              description: "Prometheus cannot reach backend:8000/metrics for 2 minutes."
+      - {eval_time: 20m, alertname: HighScanFailureRate, exp_alerts: [{exp_labels: {severity: warning}, exp_annotations: {summary: "More than 30% of scans failed in the last hour", description: "Check worker logs and the per-scanner `errors` in failing results."}}]}
+  - name: too few scans never trigger the failure-rate alert
+    interval: 1m
+    input_series:
+      - {series: 'secureship_scans_finished_last_hour{status="failed"}', values: '2+0x30'}
+      - {series: 'secureship_scans_finished_last_hour{status="done"}', values: '0+0x30'}
+    alert_rule_test:
+      - {eval_time: 25m, alertname: HighScanFailureRate, exp_alerts: []}

@@ -43,6 +43,10 @@ jobs:
         run: |
           docker run --rm -v "$PWD:/src" aquasec/trivy:0.58.0 fs \
             --scanners vuln,secret --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 /src
+      - name: Prometheus rules (lint + unit tests)
+        run: |
+          docker run --rm -v "$PWD/monitoring:/m" -w /m --entrypoint promtool prom/prometheus:v2.55.1 check rules rules.yml
+          docker run --rm -v "$PWD/monitoring:/m" -w /m --entrypoint promtool prom/prometheus:v2.55.1 test rules rules_test.yml
       - name: Checkov (informational)
         run: |
           docker run --rm -v "$PWD:/src" bridgecrew/checkov:3.4.0 -d /src \
