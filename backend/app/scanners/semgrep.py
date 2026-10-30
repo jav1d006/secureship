@@ -16,7 +16,7 @@ def run(path: Path) -> dict:
         raise ScannerError("semgrep rules not found in image")
     env = {**os.environ, "HOME": "/tmp", "SEMGREP_SEND_METRICS": "off"}
     cmd = [config.SEMGREP_BIN, "scan", "--config", str(config.SEMGREP_RULES), "--json", "--quiet",
-           "--metrics", "off", "--disable-version-check", "--timeout", "20",
+           "--metrics", "off", "--disable-version-check", "--timeout", "10", "--jobs", "2", "--max-memory", "400",
            "--max-target-bytes", "1000000", "--exclude", "node_modules", str(path)]
     try:
         proc = subprocess.run(cmd, capture_output=True, text=True, env=env, timeout=config.SCAN_TIMEOUT_SEC)

@@ -171,6 +171,12 @@ export default function Home() {
               <div className="warn" key={k}><b>{meta(k)?.tool || k}</b> could not run: {msg}</div>
             ))}
 
+            {Object.entries(result.skipped || {}).map(([k, msg]) => (
+              <div className="muted" key={k} style={{ fontSize: 13, margin: "4px 0" }}>
+                ⏭ {meta(k)?.label || k} skipped: {msg}
+              </div>
+            ))}
+
             <div className="chips">
               <button className={`chip ${filter === "all" ? "on" : ""}`} onClick={() => { setFilter("all"); setLimit(30); }}>All ({all.length})</button>
               {SEV.filter((s) => counts[s]).map((s) => (

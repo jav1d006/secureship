@@ -28,7 +28,7 @@ def run(path: Path) -> dict:
         config.TRIVY_BIN, "fs", "--scanners", "vuln",
         "--skip-db-update", "--skip-java-db-update", "--offline-scan",
         "--cache-dir", str(CACHE), "--format", "json", "--quiet", "--no-progress",
-        str(path),
+        "--skip-dirs", "**/node_modules", "--skip-dirs", "**/.git", str(path),
     ]
     try:
         proc = subprocess.run(cmd, capture_output=True, text=True, timeout=config.SCAN_TIMEOUT_SEC)
