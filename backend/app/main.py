@@ -1,29 +1,45 @@
+import asyncio
 import logging
 import re
+import time
 from contextlib import asynccontextmanager
 
 from fastapi import APIRouter, Depends, FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
-from prometheus_client import CONTENT_TYPE_LATEST, Gauge, generate_latest
+from prometheus_client import CONTENT_TYPE_LATEST, Counter, Gauge, Histogram, generate_latest
 
 from . import config, db, worker
 from .scanners import META, SCANNERS
 from .security import client_ip, hit, limit_reads, limit_scans, new_token
 
 logging.basicConfig(level=logging.INFO)
+log = logging.getLogger("secureship.api")
 
 SCAN_ID_RE = re.compile(r"^[0-9a-f]{32}$")
 QUEUE_LEN = Gauge("secureship_queue_length", "Scans waiting in queue")
 SCANS = Gauge("secureship_scans", "Scans by status", ["status"])
+HTTP_REQS = Counter("secureship_http_requests_total", "HTTP requests", ["method", "route", "status"])
+HTTP_LAT = Histogram("secureship_http_request_seconds", "HTTP request latency", ["route"])
 MAX_BODY = config.MAX_UPLOAD_MB * 1024 * 1024 + 1024 * 1024
+
+
+async def _maintenance_loop() -> None:
+    while True:
+        await asyncio.sleep(config.MAINTENANCE_INTERVAL_SEC)
+        try:
+            await asyncio.to_thread(worker.maintain)
+        except Exception:
+            log.exception("maintenance failed")
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     db.init_db()
     worker.requeue_unfinished()
+    task = asyncio.create_task(_maintenance_loop())
     yield
+    task.cancel()
 
 
 app = FastAPI(title="SecureShip API", version="1.0.0", lifespan=lifespan,
@@ -42,7 +58,13 @@ async def harden(request: Request, call_next):
     cl = request.headers.get("content-length")
     if cl and cl.isdigit() and int(cl) > MAX_BODY:
         return JSONResponse({"detail": "request too large"}, status_code=413)
+    started = time.perf_counter()
     resp = await call_next(request)
+    route = getattr(request.scope.get("route"), "path", "unmatched")
+    if route != "/metrics":
+        HTTP_REQS.labels(request.method, route, str(resp.status_code)).inc()
+        HTTP_LAT.labels(route).observe(time.perf_counter() - started)
+    resp.headers["X-Robots-Tag"] = "noindex, nofollow"
     resp.headers["X-Content-Type-Options"] = "nosniff"
     resp.headers["X-Frame-Options"] = "DENY"
     resp.headers["Referrer-Policy"] = "no-referrer"

@@ -8,10 +8,17 @@ spec:
   template:
     metadata: {labels: {app: postgres}}
     spec:
+      automountServiceAccountToken: false
+      enableServiceLinks: false
       nodeSelector: {kubernetes.io/hostname: node2}
+      securityContext: {runAsNonRoot: true, runAsUser: 70, runAsGroup: 70, fsGroup: 70, seccompProfile: {type: RuntimeDefault}}
       containers:
         - name: postgres
           image: postgres:16-alpine
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: ["ALL"]}
           ports: [{containerPort: 5432}]
           envFrom: [{secretRef: {name: db-secret}}]
           env: [{name: PGDATA, value: /var/lib/postgresql/data/pgdata}]
@@ -21,7 +28,17 @@ spec:
           readinessProbe:
             exec: {command: ["pg_isready", "-U", "secureship"]}
             periodSeconds: 10
-          volumeMounts: [{name: data, mountPath: /var/lib/postgresql/data}]
+          livenessProbe:
+            exec: {command: ["pg_isready", "-U", "secureship"]}
+            initialDelaySeconds: 30
+            periodSeconds: 20
+          volumeMounts:
+            - {name: data, mountPath: /var/lib/postgresql/data}
+            - {name: tmp, mountPath: /tmp}
+            - {name: run, mountPath: /var/run/postgresql}
+      volumes:
+        - {name: tmp, emptyDir: {sizeLimit: 128Mi}}
+        - {name: run, emptyDir: {sizeLimit: 8Mi}}
   volumeClaimTemplates:
     - metadata: {name: data}
       spec:
@@ -45,15 +62,38 @@ spec:
   template:
     metadata: {labels: {app: redis}}
     spec:
+      automountServiceAccountToken: false
+      enableServiceLinks: false
       nodeSelector: {kubernetes.io/hostname: node2}
+      securityContext: {runAsNonRoot: true, runAsUser: 999, runAsGroup: 999, seccompProfile: {type: RuntimeDefault}}
       containers:
         - name: redis
           image: redis:7-alpine
-          args: ["--maxmemory", "64mb", "--maxmemory-policy", "allkeys-lru", "--save", ""]
+          # --requirepass only when redis-secret exists (see README); otherwise Redis stays NetworkPolicy-protected only.
+          command: ["sh", "-c"]
+          args: ['exec redis-server --save "" --dir /tmp --maxmemory 64mb --maxmemory-policy allkeys-lru ${REDIS_PASSWORD:+--requirepass "$REDIS_PASSWORD"}']
+          env:
+            - name: REDIS_PASSWORD
+              valueFrom: {secretKeyRef: {name: redis-secret, key: REDIS_PASSWORD, optional: true}}
+            - name: REDISCLI_AUTH
+              valueFrom: {secretKeyRef: {name: redis-secret, key: REDIS_PASSWORD, optional: true}}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: ["ALL"]}
           ports: [{containerPort: 6379}]
+          readinessProbe:
+            exec: {command: ["redis-cli", "ping"]}
+            periodSeconds: 10
+          livenessProbe:
+            exec: {command: ["redis-cli", "ping"]}
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          volumeMounts: [{name: tmp, mountPath: /tmp}]
           resources:
             requests: {cpu: 20m, memory: 32Mi}
             limits: {memory: 96Mi}
+      volumes: [{name: tmp, emptyDir: {sizeLimit: 32Mi}}]
 ---
 apiVersion: v1
 kind: Service

@@ -1,0 +1,4 @@
+Contact: https://github.com/jav1d006/secureship/security/advisories/new
+Expires: 2027-10-30T00:00:00.000Z
+Preferred-Languages: en, az
+Policy: https://github.com/jav1d006/secureship/blob/main/SECURITY.md
