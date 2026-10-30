@@ -137,6 +137,37 @@ SecureShip is a security tool, so it is held to the standard it checks for.
 - A maintenance loop in the API (`MAINTENANCE_INTERVAL_SEC`) re-queues scans Redis forgot and deletes finished scans older than `RETENTION_DAYS` (30).
 - PostgreSQL access goes through a connection pool; the worker is a plain RQ worker (`python -m app.run_worker`).
 
+## GitHub Action and badge
+
+Scan every pull request with one step. Create an API key (`POST /api/v1/keys`), store it as the repository secret `SECURESHIP_API_KEY`:
+
+```yaml
+# .github/workflows/secureship.yml
+name: secureship
+on: [pull_request]
+permissions: {contents: read, security-events: write}
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - id: ss
+        uses: jav1d006/secureship@main        # pin a commit SHA in production
+        with:
+          api-url: https://secureship.example.com
+          api-key: ${{ secrets.SECURESHIP_API_KEY }}
+          scanners: secrets,dependencies,code,semgrep
+          fail-under: 70                       # job fails below this score
+          sarif-file: secureship.sarif
+      - uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with: {sarif_file: secureship.sarif}
+```
+
+Only tracked files (`git archive HEAD`) are uploaded, so `.gitignore`d secrets never leave the runner. Outputs: `score`, `scan-id`. The script (`scripts/secureship-scan.sh`) also works in any CI: set `SECURESHIP_URL`, `SECURESHIP_API_KEY`.
+
+Badge for your README: `curl -X POST -H "X-API-Key: $KEY" $URL/api/v1/scans/$ID/share` returns a `badge_url` that anyone can load (score only; revoke with `DELETE`).
+
 ## Monitoring
 
 Prometheus scrapes the API (`/metrics`, reachable only inside the cluster) and evaluates `monitoring/rules.yml`; Grafana ships a provisioned **SecureShip overview** dashboard. Both run hardened (non-root, read-only rootfs, default-deny NetworkPolicy) and have **no Ingress**: use a port-forward.
@@ -204,6 +235,9 @@ Labels: **≥ 80** Excellent · **≥ 60** Good · **≥ 40** Needs improvement 
 | `GET` | `/api/v1/scans` | Your scans (`limit`, `offset`) |
 | `GET` | `/api/v1/scans/{id}` | Status, score and findings (owner only) |
 | `DELETE` | `/api/v1/scans/{id}` | Delete a scan (owner only) |
+| `GET` | `/api/v1/scans/{id}/export?format=sarif\|csv\|json` | Download findings as SARIF 2.1.0, CSV or JSON (finished scans, owner only) |
+| `POST` / `DELETE` | `/api/v1/scans/{id}/share` | Create / revoke a public score badge (owner only) |
+| `GET` | `/api/v1/badge/{token}.svg` | Public badge: shows only the score, never filenames or findings |
 
 Scans are bound to an owner: an HttpOnly cookie in the web UI or an `X-API-Key` header (only its SHA-256 is stored). Rate limits are per owner and per IP (`RATE_*` env vars); other owners get `404`.
 
