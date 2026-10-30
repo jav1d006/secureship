@@ -2,6 +2,9 @@
 import logging
 import os
 import shutil
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
 
 from redis import Redis
 from rq import Queue
@@ -9,10 +12,55 @@ from rq.job import Job
 
 from . import config, db
 from .safezip import UnsafeArchive, safe_extract
-from .scanners import SCANNERS
+from .scanners import GROUPS, SCANNERS, TAKES_INVENTORY, detect, trivy_config
 from .scoring import overall_score
 
 log = logging.getLogger("secureship.worker")
+
+_GATES = {"trivy": threading.Semaphore(1), "heavy": threading.Semaphore(max(1, config.HEAVY_CONCURRENCY))}
+_ORDER = {"heavy": 0, "trivy": 1}      # start the slow groups first
+
+
+def run_scanners(names: list[str], src) -> tuple[dict, dict, dict, dict]:
+    """Run the selected scanners in parallel (they are separate processes, so threads are enough).
+    Scanners with nothing to analyse in this project are skipped (Semgrep/Checkov cost seconds just to start);
+    scanners of one resource group are serialised by a gate. One failing scanner never stops the others.
+    Returns (results, errors, skipped, seconds per scanner)."""
+    inv = detect.inventory(src)
+    skipped, todo = {}, []
+    for n in dict.fromkeys(names):
+        if n not in SCANNERS:
+            continue
+        reason = detect.skip_reason(n, inv)
+        if reason:
+            skipped[n] = reason
+        else:
+            todo.append(n)
+
+    def one(name):
+        gate = _GATES.get(GROUPS.get(name))
+        if gate:
+            gate.acquire()
+        started = time.perf_counter()        # waiting for the gate is not scanner time
+        try:
+            fn = SCANNERS[name]
+            out = fn(src, inv) if name in TAKES_INVENTORY else fn(src)
+            return name, out, None, time.perf_counter() - started
+        except Exception as e:               # one scanner failing must not kill the others
+            log.warning("scanner %s failed: %s", name, e)
+            return name, None, str(e)[:200], time.perf_counter() - started
+        finally:
+            if gate:
+                gate.release()
+
+    ordered = sorted(todo, key=lambda n: _ORDER.get(GROUPS.get(n), 2))
+    with ThreadPoolExecutor(max_workers=max(1, len(ordered))) as ex:
+        done = list(ex.map(one, ordered))
+    by_name = {n: (res, err, secs) for n, res, err, secs in done}
+    results = {n: by_name[n][0] for n in todo if by_name[n][1] is None}
+    errors = {n: by_name[n][1] for n in todo if by_name[n][1] is not None}
+    timings = {n: round(by_name[n][2], 2) for n in todo}
+    return results, errors, skipped, timings
 
 
 def _redis() -> Redis:
@@ -85,20 +133,15 @@ def process(scan_id: str) -> None:
                      max_bytes=config.MAX_UNZIPPED_MB * 1024 * 1024,
                      max_files=config.MAX_FILES)
         harden_tree(scan_dir / "src")
-        results, errors = {}, {}
-        for name in db.get_scanners(scan_id):
-            fn = SCANNERS.get(name)
-            if not fn:
-                continue
-            try:
-                results[name] = fn(scan_dir / "src")
-            except Exception as e:  # one scanner failing must not kill the others
-                log.warning("scanner %s failed: %s", name, e)
-                errors[name] = str(e)[:200]
+        results, errors, skipped, timings = run_scanners(db.get_scanners(scan_id), scan_dir / "src")
         if not results:
-            raise RuntimeError("; ".join(errors.values()) or "no scanners selected")
+            why = "; ".join(errors.values()) or "; ".join(f"{k}: {v}" for k, v in skipped.items())
+            raise RuntimeError(f"nothing was analysed ({why or 'no scanners selected'})")
+        # Skipped scanners (nothing to analyse) do not count towards the score.
         score, per_module = overall_score(results)
-        db.set_done(scan_id, score, {"modules": per_module, "errors": errors, **results})
+        log.info("scan %s done in %.1fs: %s skipped=%s", scan_id, sum(timings.values()), timings, list(skipped))
+        db.set_done(scan_id, score, {"modules": per_module, "errors": errors, "skipped": skipped,
+                                     "timings": timings, **results})
         db.clear_upload(scan_id)
     except UnsafeArchive as e:
         db.set_failed(scan_id, f"rejected archive: {e}")
@@ -108,4 +151,5 @@ def process(scan_id: str) -> None:
         db.set_failed(scan_id, str(e))
         db.clear_upload(scan_id)
     finally:
+        trivy_config.forget(scan_dir / "src")
         shutil.rmtree(scan_dir, ignore_errors=True)  # never keep user code

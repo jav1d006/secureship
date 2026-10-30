@@ -4,19 +4,42 @@ import subprocess
 from pathlib import Path
 
 from .. import config
+from . import detect
 from .gitleaks import ScannerError
 
 FRAMEWORKS = ("terraform,kubernetes,dockerfile,cloudformation,github_actions,gitlab_ci,"
               "arm,bicep,ansible,openapi,serverless")
+SKIP_DIRS = {"node_modules", ".git", "venv", ".venv"}
+NOT_CONFIG = {"package.json", "package-lock.json", "tsconfig.json", "composer.json", "composer.lock"}
+MAX_PROBE = 20000
+
+
+def _has_config_files(root: Path) -> bool:
+    """Checkov takes seconds just to start; skip it for projects without any IaC/CI/config files."""
+    for i, p in enumerate(root.rglob("*")):
+        if i > MAX_PROBE:
+            return True     # huge tree: do not guess, scan it
+        name, suf = p.name.lower(), p.suffix.lower()
+        if not p.is_file() or SKIP_DIRS.intersection(p.relative_to(root).parts) or name in NOT_CONFIG:
+            continue
+        if suf in (".tf", ".tfvars", ".bicep", ".yaml", ".yml", ".json") or name.startswith("dockerfile") \
+                or name.endswith(".dockerfile") or name == "containerfile":
+            return True
+    return False
+
+
 SEV = {"CRITICAL": "critical", "HIGH": "high", "MEDIUM": "medium", "LOW": "low", "INFO": "low"}
 ORDER = ["critical", "high", "medium", "low"]
 
 
-def run(path: Path) -> dict:
+def run(path: Path, inv=None) -> dict:
     """IaC / CI-config policy scan with Checkov (parses files only; offline, nothing is executed)."""
+    if not _has_config_files(path):
+        return {"findings": []}
     env = {**os.environ, "HOME": "/tmp", "BC_SKIP_MAPPING": "TRUE", "CHECKOV_RUN_SCA_PACKAGE_SCAN_V2": "false"}
-    cmd = [config.CHECKOV_BIN, "-d", str(path), "--framework", FRAMEWORKS,
-           "--quiet", "--compact", "-o", "json", "--skip-download", "--skip-path", "node_modules"]
+    frameworks = detect.checkov_frameworks(inv) if inv is not None else FRAMEWORKS
+    cmd = [config.CHECKOV_BIN, "-d", str(path), "--framework", frameworks,
+           "--quiet", "--compact", "-o", "json", "--skip-download", "--skip-path", "node_modules", "--skip-path", "vendor"]
     try:
         proc = subprocess.run(cmd, capture_output=True, text=True, env=env, timeout=config.SCAN_TIMEOUT_SEC)
     except FileNotFoundError as e:

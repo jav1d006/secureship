@@ -45,6 +45,8 @@ def init_db() -> None:
         c.execute("ALTER TABLE scans ADD COLUMN IF NOT EXISTS owner TEXT")
         c.execute("ALTER TABLE scans ADD COLUMN IF NOT EXISTS started_at TEXT")
         c.execute("ALTER TABLE scans ADD COLUMN IF NOT EXISTS attempts INTEGER NOT NULL DEFAULT 0")
+        c.execute("ALTER TABLE scans ADD COLUMN IF NOT EXISTS share_token TEXT")
+        c.execute("CREATE UNIQUE INDEX IF NOT EXISTS scans_share ON scans (share_token) WHERE share_token IS NOT NULL")
         c.execute("CREATE INDEX IF NOT EXISTS scans_owner_created ON scans (owner, created_at DESC)")
 
 
@@ -160,6 +162,17 @@ def stats() -> dict:
         ).fetchone()
 
 
+def scanner_durations() -> list[dict]:
+    """Average seconds per scanner over scans finished in the last hour (from result.timings)."""
+    with _conn() as c:
+        return c.execute(
+            """SELECT t.k AS scanner, AVG(t.v::float) AS avg
+               FROM scans, jsonb_each_text(result->'timings') AS t(k, v)
+               WHERE status='done' AND finished_at::timestamptz > now() - interval '1 hour'
+               GROUP BY t.k"""
+        ).fetchall()
+
+
 def get_scanners(scan_id: str) -> list[str]:
     with _conn() as c:
         r = c.execute("SELECT scanners FROM scans WHERE id=%s", (scan_id,)).fetchone()
@@ -187,3 +200,23 @@ def delete_scan(scan_id: str, owner: str) -> bool:
     with _conn() as c:
         return c.execute("DELETE FROM scans WHERE id=%s AND owner=%s RETURNING id",
                          (scan_id, owner)).fetchone() is not None
+
+
+def share_scan(scan_id: str, owner: str, token: str) -> str | None:
+    """Create (or return the existing) public badge token of a scan the owner holds."""
+    with _conn() as c:
+        r = c.execute("UPDATE scans SET share_token=COALESCE(share_token, %s) WHERE id=%s AND owner=%s "
+                      "RETURNING share_token", (token, scan_id, owner)).fetchone()
+    return r["share_token"] if r else None
+
+
+def unshare_scan(scan_id: str, owner: str) -> bool:
+    with _conn() as c:
+        return c.execute("UPDATE scans SET share_token=NULL WHERE id=%s AND owner=%s RETURNING id",
+                         (scan_id, owner)).fetchone() is not None
+
+
+def get_shared(token: str) -> dict | None:
+    """Only what a public badge may show: no filename, no findings."""
+    with _conn() as c:
+        return c.execute("SELECT status, score FROM scans WHERE share_token=%s", (token,)).fetchone()

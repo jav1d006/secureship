@@ -42,6 +42,9 @@ class FakeDB:
     def count_by_status(self):
         return {"queued": 2}
 
+    def scanner_durations(self):
+        return [{"scanner": "semgrep", "avg": 12.5}]
+
     def stats(self):
         return {"oldest_queued": 42.0, "done_1h": 5, "failed_1h": 1, "avg_duration": 7.5}
 
@@ -118,6 +121,7 @@ def test_metrics_exposes_monitoring_series(client):
     for line in ('secureship_oldest_queued_seconds 42.0',
                  'secureship_scans_finished_last_hour{status="failed"} 1.0',
                  'secureship_scan_duration_seconds_avg 7.5',
+                 'secureship_scanner_duration_seconds_avg{scanner="semgrep"} 12.5',
                  'secureship_dependency_up{dependency="postgres"} 1.0',
                  'secureship_dependency_up{dependency="redis"} 1.0',
                  'secureship_scans{status="queued"} 2.0'):
