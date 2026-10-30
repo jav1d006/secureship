@@ -39,6 +39,12 @@ class FakeDB:
     def list_scans_owned(self, owner, limit, offset):
         return [r for r in self.rows.values() if r["owner"] == owner]
 
+    def count_by_status(self):
+        return {"queued": 2}
+
+    def stats(self):
+        return {"oldest_queued": 42.0, "done_1h": 5, "failed_1h": 1, "avg_duration": 7.5}
+
     def delete_scan(self, sid, owner):
         return self.rows.pop(sid, None) is not None if self.get_scan_owned(sid, owner) else False
 
@@ -104,3 +110,28 @@ def test_security_headers_and_malformed_id(client):
     r = client.get("/health")
     assert r.headers["x-content-type-options"] == "nosniff"
     assert client.get("/api/v1/scans/../etc", headers={"X-API-Key": security.new_token()}).status_code == 404
+
+
+def test_metrics_exposes_monitoring_series(client):
+    client.get("/health")
+    body = client.get("/metrics").text
+    for line in ('secureship_oldest_queued_seconds 42.0',
+                 'secureship_scans_finished_last_hour{status="failed"} 1.0',
+                 'secureship_scan_duration_seconds_avg 7.5',
+                 'secureship_dependency_up{dependency="postgres"} 1.0',
+                 'secureship_dependency_up{dependency="redis"} 1.0',
+                 'secureship_scans{status="queued"} 2.0'):
+        assert line in body
+    assert 'secureship_http_requests_total{method="GET",route="/health",status="200"}' in body
+    assert "/metrics" not in body.split("secureship_http_requests_total")[1].split("# HELP")[0]
+
+
+def test_metrics_survives_dependency_failure(client, monkeypatch):
+    def boom(*a, **k):
+        raise RuntimeError("down")
+    monkeypatch.setattr(main.worker, "queue_len", boom)
+    monkeypatch.setattr(main.db, "stats", boom)
+    r = client.get("/metrics")
+    assert r.status_code == 200
+    assert 'secureship_dependency_up{dependency="redis"} 0.0' in r.text
+    assert 'secureship_dependency_up{dependency="postgres"} 0.0' in r.text

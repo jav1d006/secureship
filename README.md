@@ -95,7 +95,7 @@ API and worker are separate Deployments that share nothing but PostgreSQL and Re
 | CD | Argo CD (GitOps, automated sync, self-heal, prune) |
 | Kubernetes | 2-node cluster (kubeadm/Kubespray-style) on VirtualBox: Calico, containerd, metrics-server, local-path-provisioner |
 | Edge | MetalLB (L2) + ingress-nginx in Kubernetes; `nginx/` (hardened, unprivileged) in `docker compose` |
-| Observability | Prometheus `/metrics`: queue length, scans by status, HTTP request count and latency per route |
+| Observability | Prometheus + Grafana (provisioned dashboard, 8 alert rules unit-tested with `promtool`); API exports queue, scan and HTTP metrics |
 
 ## Security model
 
@@ -136,6 +136,35 @@ SecureShip is a security tool, so it is held to the standard it checks for.
 - Scans are retried at most `MAX_ATTEMPTS` (3); a scan stuck in `running` longer than `STUCK_AFTER_SEC` is revived, then failed. A poison archive cannot loop forever.
 - A maintenance loop in the API (`MAINTENANCE_INTERVAL_SEC`) re-queues scans Redis forgot and deletes finished scans older than `RETENTION_DAYS` (30).
 - PostgreSQL access goes through a connection pool; the worker is a plain RQ worker (`python -m app.run_worker`).
+
+## Monitoring
+
+Prometheus scrapes the API (`/metrics`, reachable only inside the cluster) and evaluates `monitoring/rules.yml`; Grafana ships a provisioned **SecureShip overview** dashboard. Both run hardened (non-root, read-only rootfs, default-deny NetworkPolicy) and have **no Ingress**: use a port-forward.
+
+```bash
+# once: Grafana admin password (the pod will not start without it)
+kubectl -n secureship create secret generic grafana-secret \
+  --from-literal=ADMIN_PASSWORD="$(openssl rand -base64 24 | tr -d '=+/')"
+kubectl -n secureship get secret grafana-secret -o jsonpath='{.data.ADMIN_PASSWORD}' | base64 -d; echo
+
+kubectl -n secureship port-forward svc/grafana 3000:3000        # http://localhost:3000  (user: admin)
+kubectl -n secureship port-forward svc/prometheus 9090:9090     # http://localhost:9090/alerts
+```
+
+Locally: `docker compose --profile monitoring up` (Prometheus :9090, Grafana :3001, admin / `dev-only`).
+
+| Alert | Fires when | Severity |
+|---|---|---|
+| `BackendDown` | API not scrapeable for 2 min | critical |
+| `DependencyDown` | API cannot reach PostgreSQL or Redis for 2 min | critical |
+| `WorkerNotProcessing` | oldest queued scan waits > 10 min (worker down / OOM) | critical |
+| `ScanQueueBacklog` | > 30 scans queued for 10 min | warning |
+| `HighScanFailureRate` | > 30% of the last hour's scans failed (min. 5 scans) | warning |
+| `SlowScans` | average scan > 2 min | warning |
+| `HighErrorRate` | > 5% of API responses are 5xx | warning |
+| `HighLatencyP95` | p95 latency > 2 s on a route | warning |
+
+Alerts are visible in Prometheus and Grafana; to get notified add an Alertmanager (or Grafana contact points) pointing at Slack/email. Edit the files in `monitoring/`, then run `python monitoring/build_k8s.py` to regenerate `k8s/monitoring-config.yaml` (a test fails if they drift).
 
 ## Security score
 
@@ -204,6 +233,7 @@ backend/
   tests/               unit tests (pytest)
   Dockerfile
 frontend/              Next.js app (scanner cards, drag & drop, results UI), public/ (robots.txt, security.txt)
+monitoring/            Prometheus config, alert rules (+ tests), Grafana dashboard; build_k8s.py generates the K8s ConfigMaps
 nginx/                 hardened edge config for docker compose (limits, headers, hidden-file blocking)
 docs/                  threat model, screenshots
 k8s/                   Deployments, Services, Ingresses, NetworkPolicies, data layer
@@ -296,7 +326,7 @@ TEST_DATABASE_URL=postgresql://user:pw@localhost:5432/db pytest -q   # + Postgre
 ## Roadmap
 
 - [ ] Commit-SHA image tags written back to Git by CI (fully hands-off GitOps)
-- [ ] Prometheus + Grafana dashboards and alert rules
+- [ ] Alertmanager / notification channel (Slack, email) for the existing alerts
 - [ ] HTTPS with cert-manager
 - [ ] Scan a GitHub repository by URL / GitHub App for pull requests
 - [ ] PDF report export

@@ -1,0 +1,150 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata: {name: prometheus-data, namespace: secureship}
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: local-path
+  resources: {requests: {storage: 2Gi}}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: prometheus, namespace: secureship}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector: {matchLabels: {app: prometheus}}
+  template:
+    metadata: {labels: {app: prometheus}}
+    spec:
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        runAsGroup: 65534
+        fsGroup: 65534
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: prometheus
+          image: prom/prometheus:v2.55.1
+          imagePullPolicy: IfNotPresent
+          args:
+            - --config.file=/etc/prometheus/prometheus.yml
+            - --storage.tsdb.path=/prometheus
+            - --storage.tsdb.retention.time=7d
+            - --storage.tsdb.retention.size=1GB
+            - --web.listen-address=:9090
+          ports: [{containerPort: 9090}]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: ["ALL"]}
+          readinessProbe: {httpGet: {path: /-/ready, port: 9090}, periodSeconds: 10}
+          livenessProbe: {httpGet: {path: /-/healthy, port: 9090}, initialDelaySeconds: 30, periodSeconds: 20}
+          resources:
+            requests: {cpu: 50m, memory: 128Mi}
+            limits: {cpu: 500m, memory: 384Mi}
+          volumeMounts:
+            - {name: config, mountPath: /etc/prometheus, readOnly: true}
+            - {name: data, mountPath: /prometheus}
+      volumes:
+        - name: config
+          configMap: {name: prometheus-config}
+        - name: data
+          persistentVolumeClaim: {claimName: prometheus-data}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: prometheus, namespace: secureship}
+spec:
+  selector: {app: prometheus}
+  ports: [{port: 9090, targetPort: 9090}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: grafana, namespace: secureship}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: grafana}}
+  template:
+    metadata: {labels: {app: grafana}}
+    spec:
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 472
+        runAsGroup: 472
+        fsGroup: 472
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: grafana
+          image: grafana/grafana:11.3.0
+          imagePullPolicy: IfNotPresent
+          ports: [{containerPort: 3000}]
+          env:
+            - name: GF_SECURITY_ADMIN_PASSWORD     # required: create grafana-secret first (see README)
+              valueFrom: {secretKeyRef: {name: grafana-secret, key: ADMIN_PASSWORD}}
+            - {name: GF_USERS_ALLOW_SIGN_UP, value: "false"}
+            - {name: GF_AUTH_ANONYMOUS_ENABLED, value: "false"}
+            - {name: GF_ANALYTICS_REPORTING_ENABLED, value: "false"}
+            - {name: GF_ANALYTICS_CHECK_FOR_UPDATES, value: "false"}
+            - {name: GF_ANALYTICS_CHECK_FOR_PLUGIN_UPDATES, value: "false"}
+            - {name: GF_SECURITY_DISABLE_GRAVATAR, value: "true"}
+            - {name: GF_LOG_MODE, value: console}
+            - {name: GF_PATHS_PLUGINS, value: /var/lib/grafana/plugins}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: ["ALL"]}
+          readinessProbe: {httpGet: {path: /api/health, port: 3000}, periodSeconds: 10}
+          livenessProbe: {httpGet: {path: /api/health, port: 3000}, initialDelaySeconds: 30, periodSeconds: 20}
+          resources:
+            requests: {cpu: 50m, memory: 96Mi}
+            limits: {cpu: 300m, memory: 256Mi}
+          volumeMounts:
+            - {name: data, mountPath: /var/lib/grafana}
+            - {name: tmp, mountPath: /tmp}
+            - {name: config, mountPath: /etc/grafana/provisioning/datasources/datasource.yml, subPath: datasource.yml, readOnly: true}
+            - {name: config, mountPath: /etc/grafana/provisioning/dashboards/dashboards.yml, subPath: dashboards.yml, readOnly: true}
+            - {name: config, mountPath: /etc/grafana/dashboards/secureship.json, subPath: secureship.json, readOnly: true}
+      volumes:
+        - {name: data, emptyDir: {sizeLimit: 256Mi}}
+        - {name: tmp, emptyDir: {sizeLimit: 64Mi}}
+        - name: config
+          configMap: {name: grafana-config}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: grafana, namespace: secureship}
+spec:
+  selector: {app: grafana}
+  ports: [{port: 3000, targetPort: 3000}]
+---
+# Default-deny is on: Prometheus may only scrape the API and be queried by Grafana;
+# Grafana may only query Prometheus. Neither has any other egress. No Ingress is created:
+# reach Grafana with `kubectl -n secureship port-forward svc/grafana 3000:3000`.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: prometheus-allow, namespace: secureship}
+spec:
+  podSelector: {matchLabels: {app: prometheus}}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from: [{podSelector: {matchLabels: {app: grafana}}}]
+      ports: [{port: 9090, protocol: TCP}]
+  egress:
+    - ports: [{port: 53, protocol: UDP}, {port: 53, protocol: TCP}]
+    - to: [{podSelector: {matchLabels: {app: backend}}}]
+      ports: [{port: 8000, protocol: TCP}]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: grafana-allow, namespace: secureship}
+spec:
+  podSelector: {matchLabels: {app: grafana}}
+  policyTypes: [Egress]
+  egress:
+    - ports: [{port: 53, protocol: UDP}, {port: 53, protocol: TCP}]
+    - to: [{podSelector: {matchLabels: {app: prometheus}}}]
+      ports: [{port: 9090, protocol: TCP}]
