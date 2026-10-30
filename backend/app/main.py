@@ -23,6 +23,7 @@ DEP_UP = Gauge("secureship_dependency_up", "1 if the dependency answered", ["dep
 OLDEST_QUEUED = Gauge("secureship_oldest_queued_seconds", "Age of the oldest queued scan")
 FINISHED_1H = Gauge("secureship_scans_finished_last_hour", "Scans finished in the last hour", ["status"])
 SCAN_SECONDS = Gauge("secureship_scan_duration_seconds_avg", "Average duration of scans finished in the last hour")
+SCANNER_SECONDS = Gauge("secureship_scanner_duration_seconds_avg", "Average seconds per scanner, last hour", ["scanner"])
 HTTP_REQS = Counter("secureship_http_requests_total", "HTTP requests", ["method", "route", "status"])
 HTTP_LAT = Histogram("secureship_http_request_seconds", "HTTP request latency", ["route"])
 MAX_BODY = config.MAX_UPLOAD_MB * 1024 * 1024 + 1024 * 1024
@@ -111,6 +112,9 @@ def metrics():
         FINISHED_1H.labels("done").set(st["done_1h"])
         FINISHED_1H.labels("failed").set(st["failed_1h"])
         SCAN_SECONDS.set(st["avg_duration"])
+        SCANNER_SECONDS.clear()
+        for r in db.scanner_durations():
+            SCANNER_SECONDS.labels(r["scanner"]).set(r["avg"])
         DEP_UP.labels("postgres").set(1)
     except Exception:
         DEP_UP.labels("postgres").set(0)

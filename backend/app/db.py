@@ -160,6 +160,17 @@ def stats() -> dict:
         ).fetchone()
 
 
+def scanner_durations() -> list[dict]:
+    """Average seconds per scanner over scans finished in the last hour (from result.timings)."""
+    with _conn() as c:
+        return c.execute(
+            """SELECT t.k AS scanner, AVG(t.v::float) AS avg
+               FROM scans, jsonb_each_text(result->'timings') AS t(k, v)
+               WHERE status='done' AND finished_at::timestamptz > now() - interval '1 hour'
+               GROUP BY t.k"""
+        ).fetchall()
+
+
 def get_scanners(scan_id: str) -> list[str]:
     with _conn() as c:
         r = c.execute("SELECT scanners FROM scans WHERE id=%s", (scan_id,)).fetchone()
