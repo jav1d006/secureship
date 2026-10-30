@@ -87,3 +87,13 @@ def test_stats_aggregates(db):
     st = db.stats()
     assert st["oldest_queued"] > 86400 * 365
     assert (st["done_1h"], st["failed_1h"]) == (1, 1) and 0 <= st["avg_duration"] < 5
+
+
+def test_share_token_roundtrip(db):
+    sid = db.create_scan("a.zip", b"PK", ["secrets"], "alice")
+    assert db.share_scan(sid, "bob", "T" * 22) is None                      # not the owner
+    assert db.share_scan(sid, "alice", "A" * 22) == "A" * 22
+    assert db.share_scan(sid, "alice", "B" * 22) == "A" * 22                # idempotent
+    assert db.get_shared("A" * 22)["status"] == "queued" and db.get_shared("X" * 22) is None
+    assert db.unshare_scan(sid, "bob") is False and db.unshare_scan(sid, "alice") is True
+    assert db.get_shared("A" * 22) is None

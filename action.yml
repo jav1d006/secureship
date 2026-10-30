@@ -1,0 +1,26 @@
+name: SecureShip scan
+description: Scan this repository with SecureShip (secrets, dependencies, SAST, IaC) and fail below a score.
+branding: {icon: shield, color: blue}
+inputs:
+  api-url: {description: "Base URL of your SecureShip instance, e.g. https://secureship.example.com", required: true}
+  api-key: {description: "SecureShip API key (store it as a repository secret)", required: true}
+  scanners: {description: "Comma-separated scanner keys", default: "secrets,dependencies,code"}
+  fail-under: {description: "Fail the job when the score is below this value (0 = never fail)", default: "0"}
+  sarif-file: {description: "Write SARIF here (upload with github/codeql-action/upload-sarif)", default: ""}
+  timeout-seconds: {description: "How long to wait for the scan", default: "600"}
+outputs:
+  score: {description: "Security score 0-100", value: "${{ steps.scan.outputs.score }}"}
+  scan-id: {description: "SecureShip scan id", value: "${{ steps.scan.outputs.scan-id }}"}
+runs:
+  using: composite
+  steps:
+    - id: scan
+      shell: bash
+      run: ${{ github.action_path }}/scripts/secureship-scan.sh
+      env:
+        SECURESHIP_URL: ${{ inputs.api-url }}
+        SECURESHIP_API_KEY: ${{ inputs.api-key }}
+        SCANNERS: ${{ inputs.scanners }}
+        FAIL_UNDER: ${{ inputs.fail-under }}
+        SARIF_FILE: ${{ inputs.sarif-file }}
+        TIMEOUT_SEC: ${{ inputs.timeout-seconds }}
