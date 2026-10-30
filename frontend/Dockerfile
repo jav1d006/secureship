@@ -17,6 +17,7 @@ RUN rm -rf /usr/local/lib/node_modules/npm \
 
 COPY --from=build /app/.next/standalone ./
 COPY --from=build /app/.next/static ./.next/static
+COPY --from=build /app/public ./public
 
 USER 10001
 EXPOSE 3000

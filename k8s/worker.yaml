@@ -7,6 +7,8 @@ spec:
   template:
     metadata: {labels: {app: worker}}
     spec:
+      automountServiceAccountToken: false
+      enableServiceLinks: false
       nodeSelector: {kubernetes.io/hostname: node1}
       securityContext: {runAsNonRoot: true, runAsUser: 10001, seccompProfile: {type: RuntimeDefault}}
       containers:
@@ -14,11 +16,14 @@ spec:
           image: ghcr.io/jav1d006/secureship-backend:latest
           imagePullPolicy: Always
           workingDir: /srv
-          command: ["rq", "worker", "scans", "--url", "$(REDIS_URL)"]
+          command: ["python", "-m", "app.run_worker"]
           envFrom: [{secretRef: {name: db-secret}}]
           env:
             - {name: REDIS_URL, value: "redis://redis:6379/0"}
             - {name: WORK_DIR, value: /tmp/work}
+            - {name: HOME, value: /tmp}
+            - name: REDIS_PASSWORD
+              valueFrom: {secretKeyRef: {name: redis-secret, key: REDIS_PASSWORD, optional: true}}
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true

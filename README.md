@@ -38,6 +38,9 @@ It is also a complete **DevSecOps reference project**: the application itself is
 | `code` | SAST | [Bandit](https://github.com/PyCQA/bandit) | Insecure patterns in Python source |
 | `iac` | IaC | Trivy | Misconfigurations in Terraform, Kubernetes, Helm, CloudFormation |
 | `docker` | Container | Trivy | Insecure Dockerfile instructions (root user, `latest` tags, `ADD` ...) |
+| `semgrep` | SAST (multi-language) | [Semgrep](https://semgrep.dev) | Insecure patterns in JS/TS, Python, Go, Java, Ruby, PHP ... (OWASP rules baked into the image, runs offline) |
+| `checkov` | IaC policies | [Checkov](https://www.checkov.io) | Terraform, Kubernetes, CloudFormation, GitHub Actions, GitLab CI, Ansible, OpenAPI ... |
+| `shell` | Shell SAST | [ShellCheck](https://www.shellcheck.net) | Bugs and unsafe constructs in `.sh` / `.bash` scripts |
 
 Scanners are pluggable: each one is a function `run(path) -> {"findings": [...]}` registered in `backend/app/scanners/__init__.py`. The frontend builds its scanner cards from `GET /api/scanners`, so adding a scanner needs **no frontend change**.
 
@@ -86,13 +89,13 @@ API and worker are separate Deployments that share nothing but PostgreSQL and Re
 | API | Python 3.12, FastAPI, Uvicorn |
 | Queue | Redis 7 + [RQ](https://python-rq.org/) |
 | Database | PostgreSQL 16 (`psycopg` 3) |
-| Scanners | Gitleaks 8.28, Trivy 0.58 (vulnerability DB baked into the image, runs offline), Bandit |
+| Scanners | Gitleaks 8.28, Trivy 0.58 (DB baked in, offline), Bandit, Semgrep, Checkov, ShellCheck (each Python tool in its own virtualenv) |
 | Containers | Non-root images (frontend multi-stage), checksum-verified Gitleaks, pinned Python deps, published to GHCR |
 | CI | GitHub Actions |
 | CD | Argo CD (GitOps, automated sync, self-heal, prune) |
 | Kubernetes | 2-node cluster (kubeadm/Kubespray-style) on VirtualBox: Calico, containerd, metrics-server, local-path-provisioner |
-| Edge | MetalLB (L2) + ingress-nginx |
-| Observability | Prometheus metrics endpoint (`/metrics`) |
+| Edge | MetalLB (L2) + ingress-nginx in Kubernetes; `nginx/` (hardened, unprivileged) in `docker compose` |
+| Observability | Prometheus `/metrics`: queue length, scans by status, HTTP request count and latency per route |
 
 ## Security model
 
@@ -104,13 +107,20 @@ SecureShip is a security tool, so it is held to the standard it checks for.
 - Static analysis only: nothing from the archive is executed, imported or installed.
 - Gitleaks runs with `--redact`; secrets are never stored. The archive is wiped from the database and disk after every scan.
 
+**Edge (nginx / ingress)**
+- Per-IP rate limits (stricter for `POST /api/v1/scans` and `/api/v1/keys`), connection limits, 26 MB body cap, short header/body timeouts, unknown `Host` dropped (`444`), only `GET/HEAD/POST/DELETE/OPTIONS`.
+- Hidden files (`/.git`, `/.env`, ...) and backup/config/key/source extensions return `404`; `autoindex off`; `/metrics` and `/ready` are not exposed.
+- Security headers on every response (CSP for the UI, `nosniff`, `DENY` framing, no-referrer, Permissions-Policy, COOP/CORP, HSTS once TLS is in front); `server_tokens off`; client `X-Forwarded-For`/`X-Real-IP` are overwritten.
+- `robots.txt` (`Disallow: /api/`), `/.well-known/security.txt` and `X-Robots-Tag: noindex` on API responses.
+
 **Supply chain and CI gates**
-- Every push runs unit tests, a Gitleaks secret scan and builds the images.
+- Every push runs unit + API + PostgreSQL integration tests, a Gitleaks secret scan and a **self-scan** (Trivy config/fs gate on this repo, Checkov), then builds the images.
 - **Trivy blocks the pipeline on HIGH/CRITICAL** vulnerabilities in the built image (`--ignore-unfixed`); the image is only pushed to GHCR if the gate passes.
 - Third-party scanner binaries (Gitleaks, Trivy) are excluded from the image gate with a documented reason: they run offline against files and expose no network services.
-- Images are tagged with the commit SHA as well as `latest`.
+- Images are tagged with the commit SHA as well as `latest`; each build publishes a CycloneDX **SBOM** artifact and, on `main`, a keyless **cosign** signature.
+- Gitleaks is checksum-verified, Python dependencies are pinned, Dependabot keeps pip/npm/docker/actions current.
 
-**Runtime hardening (backend, worker, frontend pods)**
+**Runtime hardening (every pod)**
 - `runAsNonRoot` (UID 10001), `allowPrivilegeEscalation: false`, all Linux capabilities dropped, `seccompProfile: RuntimeDefault`.
 - `readOnlyRootFilesystem: true`; writable paths are explicit `emptyDir` mounts (`/tmp`).
 - Resource requests and limits on every container.
@@ -119,8 +129,13 @@ SecureShip is a security tool, so it is held to the standard it checks for.
   - backend + worker → PostgreSQL (5432) and Redis (6379),
   - backend + worker → DNS (53).
   The worker (which processes untrusted files) has no route to the internet.
-- Postgres and Redis are isolated by NetworkPolicy only (no pod-level hardening or Redis auth yet).
+- Postgres and Redis run non-root with read-only root filesystem, dropped capabilities and probes; Redis supports `requirepass` (see below). No pod mounts a service-account token.
 - Database credentials live in a Kubernetes Secret created out-of-band; they are **not** in Git.
+
+## Reliability
+- Scans are retried at most `MAX_ATTEMPTS` (3); a scan stuck in `running` longer than `STUCK_AFTER_SEC` is revived, then failed. A poison archive cannot loop forever.
+- A maintenance loop in the API (`MAINTENANCE_INTERVAL_SEC`) re-queues scans Redis forgot and deletes finished scans older than `RETENTION_DAYS` (30).
+- PostgreSQL access goes through a connection pool; the worker is a plain RQ worker (`python -m app.run_worker`).
 
 ## Security score
 
@@ -140,6 +155,9 @@ Each module starts at 100 and loses points per finding. The overall score is the
 | iac | 20 |
 | code | 20 |
 | docker | 10 |
+| semgrep | 20 |
+| checkov | 15 |
+| shell | 5 |
 
 Labels: **≥ 80** Excellent · **≥ 60** Good · **≥ 40** Needs improvement · **< 40** Poor.
 
@@ -181,10 +199,13 @@ backend/
     config.py          environment settings
     safezip.py         hardened ZIP extraction
     scoring.py         score model
-    scanners/          gitleaks.py, trivy.py, trivy_config.py, bandit.py, registry (__init__.py)
+    run_worker.py      RQ worker entrypoint
+    scanners/          gitleaks, trivy, trivy_config, bandit, semgrep, checkov, shellcheck, registry (__init__.py)
   tests/               unit tests (pytest)
   Dockerfile
-frontend/              Next.js app (scanner cards, drag & drop, results UI)
+frontend/              Next.js app (scanner cards, drag & drop, results UI), public/ (robots.txt, security.txt)
+nginx/                 hardened edge config for docker compose (limits, headers, hidden-file blocking)
+docs/                  threat model, screenshots
 k8s/                   Deployments, Services, Ingresses, NetworkPolicies, data layer
 .github/workflows/     CI (tests, Gitleaks, Trivy gate, GHCR push)
 ```
@@ -223,6 +244,11 @@ spec:
     syncOptions: [CreateNamespace=true]
 EOF
 
+# 2b. Optional but recommended: Redis password (restart redis, backend and worker afterwards)
+kubectl -n secureship create secret generic redis-secret \
+  --from-literal=REDIS_PASSWORD="$(openssl rand -base64 24 | tr -d '=+/')"
+kubectl -n secureship rollout restart deploy/redis deploy/backend deploy/worker
+
 # 3. Point a hostname at the ingress IP (hosts file)
 echo "192.168.0.200  secureship.local" | sudo tee -a /etc/hosts
 ```
@@ -232,11 +258,11 @@ Open <http://secureship.local>.
 ### Local development
 
 ```bash
-docker compose up --build   # API :8000 + worker + Postgres + Redis (dev credentials)
-curl localhost:8000/ready
+docker compose up --build   # nginx edge :8080 -> frontend + API, worker, Postgres, Redis (dev credentials)
+curl localhost:8080/health
 ```
 
-The frontend is served via ingress in Kubernetes; locally run `npm run dev` in `frontend/` against the API.
+`http://localhost:8080` serves the UI and the API through the same nginx rules used in production (`nginx/`).
 
 ### Run the tests
 
@@ -245,6 +271,7 @@ cd backend
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements-dev.txt
 pytest -q
+TEST_DATABASE_URL=postgresql://user:pw@localhost:5432/db pytest -q   # + PostgreSQL integration tests
 ```
 
 ## Screenshots
@@ -262,19 +289,21 @@ pytest -q
 - The Trivy vulnerability database is baked into the image at build time, so rebuild the image regularly to stay current.
 - The reference cluster is a two-node lab with limited RAM; a single replica of each component is used.
 - Identity is an anonymous token (cookie / API key), not a user account; losing it loses access to your scans.
-- No automatic retention: scans are kept until deleted via the API.
+- Results are deleted automatically after `RETENTION_DAYS`; the SBOM/signature steps need the GitHub-hosted CI.
+- Semgrep rules are fetched when the image is built; rebuild regularly (Dependabot + CI) to refresh them.
+- No TLS in the lab cluster yet (cert-manager is on the roadmap), so HSTS and `Secure` cookies are inactive.
 
 ## Roadmap
 
-- [ ] Semgrep (multi-language SAST) and Checkov (IaC, Dockerfile, Kubernetes manifests)
 - [ ] Commit-SHA image tags written back to Git by CI (fully hands-off GitOps)
 - [ ] Prometheus + Grafana dashboards and alert rules
 - [ ] HTTPS with cert-manager
 - [ ] Scan a GitHub repository by URL / GitHub App for pull requests
 - [ ] PDF report export
 - [ ] User accounts
-- [ ] Retention job, stuck-scan reaper, Redis auth, Postgres/Redis pod hardening
-- [ ] CI: dogfood own scanners (`trivy config`/`fs`), SBOM, cosign
+- [ ] Accounts, plans/quotas and billing (SaaS tier)
+- [ ] Pin base images and actions by digest/SHA
+- [ ] Sealed Secrets / SOPS for in-Git secrets
 
 ## Author
 

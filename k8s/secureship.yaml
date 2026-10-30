@@ -3,19 +3,6 @@ kind: Namespace
 metadata:
   name: secureship
 ---
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: secureship-data
-  namespace: secureship
-spec:
-  accessModes:
-  - ReadWriteOnce
-  storageClassName: local-path
-  resources:
-    requests:
-      storage: 2Gi
----
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -33,6 +20,8 @@ spec:
       labels:
         app: backend
     spec:
+      automountServiceAccountToken: false
+      enableServiceLinks: false
       nodeSelector:
         kubernetes.io/hostname: node1
       securityContext:
@@ -52,6 +41,9 @@ spec:
           value: http://secureship.local
         - name: REDIS_URL
           value: redis://redis:6379/0
+        - name: REDIS_PASSWORD        # optional: see README ("Redis password")
+          valueFrom:
+            secretKeyRef: {name: redis-secret, key: REDIS_PASSWORD, optional: true}
         resources:
           requests:
             cpu: 100m
@@ -67,7 +59,7 @@ spec:
             - ALL
         readinessProbe:
           httpGet:
-            path: /health
+            path: /ready
             port: 8000
           initialDelaySeconds: 3
           periodSeconds: 10
@@ -78,17 +70,12 @@ spec:
           initialDelaySeconds: 10
           periodSeconds: 20
         volumeMounts:
-        - name: data
-          mountPath: /data
         - name: tmp
           mountPath: /tmp
         envFrom:
         - secretRef:
             name: db-secret
       volumes:
-      - name: data
-        persistentVolumeClaim:
-          claimName: secureship-data
       - name: tmp
         emptyDir:
           sizeLimit: 256Mi
@@ -111,7 +98,10 @@ metadata:
   name: secureship
   namespace: secureship
   annotations:
-    nginx.ingress.kubernetes.io/proxy-body-size: 30m
+    nginx.ingress.kubernetes.io/proxy-body-size: 26m
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "60"
+    nginx.ingress.kubernetes.io/limit-rps: "20"
+    nginx.ingress.kubernetes.io/limit-connections: "30"
 spec:
   ingressClassName: nginx
   rules:

@@ -7,6 +7,8 @@ spec:
   template:
     metadata: {labels: {app: frontend}}
     spec:
+      automountServiceAccountToken: false
+      enableServiceLinks: false
       securityContext: {runAsNonRoot: true, runAsUser: 10001, seccompProfile: {type: RuntimeDefault}}
       containers:
         - name: frontend
@@ -18,6 +20,7 @@ spec:
             readOnlyRootFilesystem: true
             capabilities: {drop: ["ALL"]}
           readinessProbe: {httpGet: {path: /, port: 3000}, periodSeconds: 10}
+          livenessProbe: {httpGet: {path: /, port: 3000}, initialDelaySeconds: 10, periodSeconds: 20}
           resources:
             requests: {cpu: 20m, memory: 64Mi}
             limits: {memory: 160Mi}
@@ -37,7 +40,12 @@ spec:
 ---
 apiVersion: networking.k8s.io/v1
 kind: Ingress
-metadata: {name: frontend, namespace: secureship}
+metadata:
+  name: frontend
+  namespace: secureship
+  annotations:
+    nginx.ingress.kubernetes.io/limit-rps: "50"
+    nginx.ingress.kubernetes.io/limit-connections: "50"
 spec:
   ingressClassName: nginx
   rules:

@@ -1,4 +1,4 @@
-from . import bandit, gitleaks, trivy, trivy_config
+from . import bandit, checkov, gitleaks, semgrep, shellcheck, trivy, trivy_config
 
 # key = scoring module name (see scoring.WEIGHTS); each scanner exposes run(path) -> dict
 SCANNERS = {
@@ -7,6 +7,9 @@ SCANNERS = {
     "code": bandit.run,
     "iac": trivy_config.run_iac,
     "docker": trivy_config.run_docker,
+    "semgrep": semgrep.run,
+    "checkov": checkov.run,
+    "shell": shellcheck.run,
 }
 
 META = [
@@ -20,4 +23,10 @@ META = [
      "description": "Misconfigurations in Terraform, Kubernetes, Helm and CloudFormation."},
     {"key": "docker", "label": "Dockerfile", "type": "Container", "tool": "Trivy",
      "description": "Insecure Dockerfile instructions (root user, latest tags, ADD ...)."},
+    {"key": "semgrep", "label": "Multi-language SAST", "type": "SAST", "tool": "Semgrep",
+     "description": "Insecure patterns in JavaScript/TypeScript, Python, Go, Java, Ruby, PHP and more (OWASP rules)."},
+    {"key": "checkov", "label": "IaC policies", "type": "IaC", "tool": "Checkov",
+     "description": "Policy violations in Terraform, Kubernetes, CloudFormation, GitHub Actions, GitLab CI and more."},
+    {"key": "shell", "label": "Shell scripts", "type": "SAST", "tool": "ShellCheck",
+     "description": "Bugs and unsafe constructs in .sh / .bash scripts."},
 ]

@@ -32,6 +32,18 @@ def queue_len() -> int:
     return len(_queue())
 
 
+def maintain() -> dict:
+    """Periodic housekeeping (run by the API): give up on poison scans, revive dead ones,
+    re-queue scans Redis forgot, delete expired results."""
+    failed = db.fail_exhausted(config.MAX_ATTEMPTS, config.STUCK_AFTER_SEC)
+    revived = db.reset_stuck(config.STUCK_AFTER_SEC)
+    requeue_unfinished()
+    purged = db.purge_old(config.RETENTION_DAYS)
+    if failed or revived or purged:
+        log.info("maintenance: failed=%s revived=%s purged=%s", failed, revived, purged)
+    return {"failed": failed, "revived": revived, "purged": purged}
+
+
 def requeue_unfinished() -> None:
     """Redis keeps no data on restart; re-queue scans that are still unfinished in Postgres."""
     try:

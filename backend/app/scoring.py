@@ -7,6 +7,9 @@ WEIGHTS = {
     "iac": 20,
     "code": 20,
     "docker": 10,
+    "semgrep": 20,
+    "checkov": 15,
+    "shell": 5,
 }
 
 PENALTY = {"critical": 25, "high": 15, "medium": 7, "low": 2}

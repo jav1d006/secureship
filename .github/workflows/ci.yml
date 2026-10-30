@@ -8,6 +8,15 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env: {POSTGRES_USER: test, POSTGRES_PASSWORD: test, POSTGRES_DB: test}
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U test" --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      TEST_DATABASE_URL: postgresql://test:test@localhost:5432/test
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -21,10 +30,27 @@ jobs:
         with: {fetch-depth: 0}
       - uses: gitleaks/gitleaks-action@v2
         env: {GITHUB_TOKEN: "${{ secrets.GITHUB_TOKEN }}"}
-  image:
-    needs: [test, secrets]
+  selfscan:
+    # SecureShip is scanned with the same kind of checks it offers to users.
     runs-on: ubuntu-latest
-    permissions: {contents: read, packages: write}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Trivy misconfiguration (Kubernetes, Dockerfiles) - blocking
+        run: |
+          docker run --rm -v "$PWD:/src" aquasec/trivy:0.58.0 config \
+            --severity HIGH,CRITICAL --exit-code 1 /src
+      - name: Trivy dependencies and secrets - blocking
+        run: |
+          docker run --rm -v "$PWD:/src" aquasec/trivy:0.58.0 fs \
+            --scanners vuln,secret --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 /src
+      - name: Checkov (informational)
+        run: |
+          docker run --rm -v "$PWD:/src" bridgecrew/checkov:3.4.0 -d /src \
+            --framework kubernetes,dockerfile,github_actions --quiet --compact --soft-fail
+  image:
+    needs: [test, secrets, selfscan]
+    runs-on: ubuntu-latest
+    permissions: {contents: read, packages: write, id-token: write}
     steps:
       - uses: actions/checkout@v4
       - uses: docker/build-push-action@v6
@@ -34,13 +60,20 @@ jobs:
           docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
             aquasec/trivy:0.58.0 image --severity HIGH,CRITICAL \
             --ignore-unfixed --skip-files '**/gitleaks' --skip-files '**/trivy' --skip-dirs '**/trivy-cache' --exit-code 1 secureship-backend:ci
+      - name: SBOM (CycloneDX)
+        run: |
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "$PWD:/out" \
+            aquasec/trivy:0.58.0 image --format cyclonedx --output /out/sbom-backend.cdx.json secureship-backend:ci
+      - uses: actions/upload-artifact@v4
+        with: {name: sbom-backend, path: sbom-backend.cdx.json}
       - if: github.ref == 'refs/heads/main'
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - if: github.ref == 'refs/heads/main'
+      - id: push
+        if: github.ref == 'refs/heads/main'
         uses: docker/build-push-action@v6
         with:
           context: backend
@@ -48,9 +81,15 @@ jobs:
           tags: |
             ghcr.io/jav1d006/secureship-backend:latest
             ghcr.io/jav1d006/secureship-backend:${{ github.sha }}
+      - if: github.ref == 'refs/heads/main'
+        uses: sigstore/cosign-installer@v3
+      - name: Sign image (keyless)
+        if: github.ref == 'refs/heads/main'
+        run: cosign sign --yes ghcr.io/jav1d006/secureship-backend@${{ steps.push.outputs.digest }}
   frontend:
+    needs: [selfscan]
     runs-on: ubuntu-latest
-    permissions: {contents: read, packages: write}
+    permissions: {contents: read, packages: write, id-token: write}
     steps:
       - uses: actions/checkout@v4
       - uses: docker/build-push-action@v6
@@ -60,13 +99,20 @@ jobs:
           docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
             aquasec/trivy:0.58.0 image --severity HIGH,CRITICAL \
             --ignore-unfixed --exit-code 1 secureship-frontend:ci
+      - name: SBOM (CycloneDX)
+        run: |
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "$PWD:/out" \
+            aquasec/trivy:0.58.0 image --format cyclonedx --output /out/sbom-frontend.cdx.json secureship-frontend:ci
+      - uses: actions/upload-artifact@v4
+        with: {name: sbom-frontend, path: sbom-frontend.cdx.json}
       - if: github.ref == 'refs/heads/main'
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - if: github.ref == 'refs/heads/main'
+      - id: push
+        if: github.ref == 'refs/heads/main'
         uses: docker/build-push-action@v6
         with:
           context: frontend
@@ -74,3 +120,8 @@ jobs:
           tags: |
             ghcr.io/jav1d006/secureship-frontend:latest
             ghcr.io/jav1d006/secureship-frontend:${{ github.sha }}
+      - if: github.ref == 'refs/heads/main'
+        uses: sigstore/cosign-installer@v3
+      - name: Sign image (keyless)
+        if: github.ref == 'refs/heads/main'
+        run: cosign sign --yes ghcr.io/jav1d006/secureship-frontend@${{ steps.push.outputs.digest }}
