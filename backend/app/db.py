@@ -141,6 +141,25 @@ def count_by_status() -> dict:
     return {r["status"]: r["n"] for r in rows}
 
 
+def stats() -> dict:
+    """Aggregates for monitoring: queue age, last-hour outcomes and average scan duration."""
+    with _conn() as c:
+        return c.execute(
+            """SELECT
+                 COALESCE(EXTRACT(EPOCH FROM now() - MIN(created_at::timestamptz)
+                          FILTER (WHERE status='queued')), 0)::float AS oldest_queued,
+                 COUNT(*) FILTER (WHERE status='done'
+                          AND finished_at::timestamptz > now() - interval '1 hour') AS done_1h,
+                 COUNT(*) FILTER (WHERE status='failed'
+                          AND finished_at::timestamptz > now() - interval '1 hour') AS failed_1h,
+                 COALESCE(AVG(EXTRACT(EPOCH FROM finished_at::timestamptz
+                                      - COALESCE(started_at, created_at)::timestamptz))
+                          FILTER (WHERE status='done'
+                          AND finished_at::timestamptz > now() - interval '1 hour'), 0)::float AS avg_duration
+               FROM scans"""
+        ).fetchone()
+
+
 def get_scanners(scan_id: str) -> list[str]:
     with _conn() as c:
         r = c.execute("SELECT scanners FROM scans WHERE id=%s", (scan_id,)).fetchone()

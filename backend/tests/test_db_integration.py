@@ -75,3 +75,15 @@ def test_purge_old_only_removes_finished_expired(db):
     age(db, done, created_at=old); age(db, queued, created_at=old)
     assert db.purge_old(30) == 1
     assert db.get_scan_owned(done, "o") is None and db.get_scan_owned(queued, "o") and db.get_scan_owned(fresh, "o")
+
+
+def test_stats_aggregates(db):
+    empty = db.stats()
+    assert empty["oldest_queued"] == 0 and empty["done_1h"] == 0 and empty["avg_duration"] == 0
+    q = db.create_scan("q.zip", b"PK", ["secrets"], "o")
+    age(db, q, created_at="2000-01-01T00:00:00+00:00")
+    d = db.create_scan("d.zip", b"PK", ["secrets"], "o"); db.set_running(d); db.set_done(d, 90, {})
+    f = db.create_scan("f.zip", b"PK", ["secrets"], "o"); db.set_failed(f, "x")
+    st = db.stats()
+    assert st["oldest_queued"] > 86400 * 365
+    assert (st["done_1h"], st["failed_1h"]) == (1, 1) and 0 <= st["avg_duration"] < 5
