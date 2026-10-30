@@ -31,5 +31,11 @@ spec:
           resources:
             requests: {cpu: 250m, memory: 256Mi}
             limits: {memory: 1Gi}
-          volumeMounts: [{name: tmp, mountPath: /tmp}]
-      volumes: [{name: tmp, emptyDir: {sizeLimit: 1Gi}}]
+          volumeMounts:
+            - {name: tmp, mountPath: /tmp}
+            # The Trivy vulnerability DB is copied here at start (the root fs is read-only). It is large,
+            # so it gets its own volume and limit: sharing /tmp made pods exceed 1Gi and get evicted.
+            - {name: trivy-cache, mountPath: /tmp/trivy-cache}
+      volumes:
+        - {name: tmp, emptyDir: {sizeLimit: 1Gi}}
+        - {name: trivy-cache, emptyDir: {sizeLimit: 3Gi}}
