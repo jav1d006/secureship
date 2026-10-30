@@ -11,8 +11,7 @@ RUN curl -fsSL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEA
     && tar -xzf /tmp/gitleaks.tar.gz -C /usr/local/bin gitleaks
 # Semgrep rules are fetched at build time (refreshed on every rebuild) so scans run fully offline.
 RUN mkdir -p /opt/semgrep-rules \
-    && curl -fsSL https://semgrep.dev/c/p/default -o /opt/semgrep-rules/default.yml \
-    && curl -fsSL https://semgrep.dev/c/p/owasp-top-ten -o /opt/semgrep-rules/owasp-top-ten.yml
+    && curl -fsSL https://semgrep.dev/c/p/default -o /opt/semgrep-rules/default.yml
 # Heavy Python tools live in their own virtualenvs so their dependencies never clash with the API's.
 COPY requirements-semgrep.txt requirements-checkov.txt ./
 RUN python -m venv /opt/semgrep && /opt/semgrep/bin/pip install --no-cache-dir -r requirements-semgrep.txt \

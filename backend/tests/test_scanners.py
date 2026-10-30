@@ -52,6 +52,7 @@ def test_trivy_config_splits_docker_and_iac(monkeypatch, tmp_path):
 
 def test_checkov_handles_dict_and_list_shapes(monkeypatch, tmp_path):
     from app.scanners import checkov
+    (tmp_path / "a.yaml").write_text("kind: Pod")
     fc = {"check_id": "CKV_K8S_9", "check_name": "Readiness probe", "file_path": "/k8s/a.yaml",
           "file_line_range": [4, 20], "severity": None, "resource": "Deployment.default.a"}
     for payload in ({"results": {"failed_checks": [fc]}},
@@ -65,6 +66,8 @@ def test_checkov_handles_dict_and_list_shapes(monkeypatch, tmp_path):
 def test_checkov_empty_output_and_failure(monkeypatch, tmp_path):
     import pytest
     from app.scanners import checkov
+    assert checkov.run(tmp_path)["findings"] == []          # no config files -> nothing to run
+    (tmp_path / "a.yaml").write_text("kind: Pod")
     monkeypatch.setattr(subprocess, "run", fake_run(stdout="", rc=0))
     assert checkov.run(tmp_path)["findings"] == []
     monkeypatch.setattr(subprocess, "run", fake_run(stdout="", rc=2))

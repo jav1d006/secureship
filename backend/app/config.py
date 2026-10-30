@@ -9,6 +9,8 @@ MAX_UPLOAD_MB = int(os.getenv("MAX_UPLOAD_MB", "25"))
 MAX_UNZIPPED_MB = int(os.getenv("MAX_UNZIPPED_MB", "100"))
 MAX_FILES = int(os.getenv("MAX_FILES", "5000"))
 SCAN_TIMEOUT_SEC = int(os.getenv("SCAN_TIMEOUT_SEC", "120"))
+# How many memory-hungry scanners (Semgrep, Checkov) may run at the same time inside one worker.
+HEAVY_CONCURRENCY = int(os.getenv("HEAVY_CONCURRENCY", "1"))
 
 GITLEAKS_BIN = os.getenv("GITLEAKS_BIN", "gitleaks")
 TRIVY_BIN = os.getenv("TRIVY_BIN", "trivy")
