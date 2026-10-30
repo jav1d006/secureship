@@ -12,6 +12,13 @@ SCANNERS = {
     "shell": shellcheck.run,
 }
 
+# Scanners that must not overlap: "trivy" runs share one on-disk cache (one at a time);
+# "heavy" ones use a lot of RAM (limited by config.HEAVY_CONCURRENCY). Everything else runs freely in parallel.
+GROUPS = {"dependencies": "trivy", "iac": "trivy", "docker": "trivy", "semgrep": "heavy", "checkov": "heavy"}
+
+# Scanners that accept the project inventory as a second argument.
+TAKES_INVENTORY = {"checkov"}
+
 META = [
     {"key": "secrets", "label": "Secrets", "type": "Secrets detection", "tool": "Gitleaks",
      "description": "Hard-coded API keys, tokens and passwords."},
