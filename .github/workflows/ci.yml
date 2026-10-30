@@ -18,23 +18,23 @@ jobs:
     env:
       TEST_DATABASE_URL: postgresql://test:test@localhost:5432/test
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with: {python-version: "3.12"}
       - run: pip install -r backend/requirements-dev.txt
       - run: cd backend && pytest -q
   secrets:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with: {fetch-depth: 0}
-      - uses: gitleaks/gitleaks-action@v2
+      - uses: gitleaks/gitleaks-action@v3
         env: {GITHUB_TOKEN: "${{ secrets.GITHUB_TOKEN }}"}
   selfscan:
     # SecureShip is scanned with the same kind of checks it offers to users.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Trivy misconfiguration (Kubernetes, Dockerfiles) - blocking
         run: |
           docker run --rm -v "$PWD:/src" aquasec/trivy:0.58.0 config \
@@ -52,8 +52,8 @@ jobs:
     runs-on: ubuntu-latest
     permissions: {contents: read, packages: write, id-token: write}
     steps:
-      - uses: actions/checkout@v4
-      - uses: docker/build-push-action@v6
+      - uses: actions/checkout@v7
+      - uses: docker/build-push-action@v7
         with: {context: backend, load: true, tags: "secureship-backend:ci"}
       - name: Trivy scan
         run: |
@@ -64,17 +64,17 @@ jobs:
         run: |
           docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "$PWD:/out" \
             aquasec/trivy:0.58.0 image --format cyclonedx --output /out/sbom-backend.cdx.json secureship-backend:ci
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with: {name: sbom-backend, path: sbom-backend.cdx.json}
       - if: github.ref == 'refs/heads/main'
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - id: push
         if: github.ref == 'refs/heads/main'
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: backend
           push: true
@@ -91,8 +91,8 @@ jobs:
     runs-on: ubuntu-latest
     permissions: {contents: read, packages: write, id-token: write}
     steps:
-      - uses: actions/checkout@v4
-      - uses: docker/build-push-action@v6
+      - uses: actions/checkout@v7
+      - uses: docker/build-push-action@v7
         with: {context: frontend, load: true, tags: "secureship-frontend:ci"}
       - name: Trivy scan
         run: |
@@ -103,17 +103,17 @@ jobs:
         run: |
           docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "$PWD:/out" \
             aquasec/trivy:0.58.0 image --format cyclonedx --output /out/sbom-frontend.cdx.json secureship-frontend:ci
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with: {name: sbom-frontend, path: sbom-frontend.cdx.json}
       - if: github.ref == 'refs/heads/main'
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - id: push
         if: github.ref == 'refs/heads/main'
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: frontend
           push: true
