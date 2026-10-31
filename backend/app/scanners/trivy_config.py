@@ -3,7 +3,7 @@ import subprocess
 import threading
 from pathlib import Path
 
-from .. import config
+from .. import config, sandbox
 from .gitleaks import ScannerError
 from .trivy import CACHE, ORDER, SEV, _ensure_cache
 
@@ -39,7 +39,7 @@ def _scan_uncached(path: Path) -> list[dict]:
            "--format", "json", "--quiet", "--no-progress",
            "--skip-dirs", "**/node_modules", "--skip-dirs", "**/.git", str(path)]
     try:
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=config.SCAN_TIMEOUT_SEC)
+        proc = sandbox.run(cmd, config.SCAN_TIMEOUT_SEC)
     except FileNotFoundError as e:
         raise ScannerError("trivy binary not found") from e
     except subprocess.TimeoutExpired as e:

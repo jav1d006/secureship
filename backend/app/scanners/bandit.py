@@ -3,7 +3,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from .. import config
+from .. import config, sandbox
 from .gitleaks import ScannerError
 
 SEV = {"HIGH": "high", "MEDIUM": "medium", "LOW": "low"}
@@ -16,7 +16,7 @@ def run(path: Path) -> dict:
         "--skip", "B101", "-x", "*/node_modules,*/venv,*/.venv,*/tests,*/test",
     ]
     try:
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=config.SCAN_TIMEOUT_SEC)
+        proc = sandbox.run(cmd, config.SCAN_TIMEOUT_SEC)
     except subprocess.TimeoutExpired as e:
         raise ScannerError("bandit timed out") from e
     if proc.returncode not in (0, 1):      # 1 = issues found
