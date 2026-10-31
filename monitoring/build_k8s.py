@@ -27,6 +27,7 @@ def render() -> str:
 
     docs = [
         cm("prometheus-config", {"prometheus.yml": "prometheus.yml", "rules.yml": "rules.yml"}),
+        cm("alertmanager-config", {"alertmanager.yml": "alertmanager.yml"}),
         cm("grafana-config", {"datasource.yml": "grafana/datasource.yml",
                               "dashboards.yml": "grafana/dashboards.yml",
                               "secureship.json": "grafana/dashboards/secureship.json"}),

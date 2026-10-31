@@ -1,0 +1,10 @@
+# Default: alerts are evaluated and visible in Prometheus/Alertmanager but sent nowhere.
+# To get e-mail, create the Secret `alertmanager-config` from alertmanager.email.example.yml (see docs/RUNBOOK.md).
+route:
+  receiver: "null"
+  group_by: [alertname]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+receivers:
+  - name: "null"

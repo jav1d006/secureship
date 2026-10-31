@@ -137,6 +137,8 @@ spec:
     - ports: [{port: 53, protocol: UDP}, {port: 53, protocol: TCP}]
     - to: [{podSelector: {matchLabels: {app: backend}}}]
       ports: [{port: 8000, protocol: TCP}]
+    - to: [{podSelector: {matchLabels: {app: alertmanager}}}]
+      ports: [{port: 9093, protocol: TCP}]
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -148,3 +150,69 @@ spec:
     - ports: [{port: 53, protocol: UDP}, {port: 53, protocol: TCP}]
     - to: [{podSelector: {matchLabels: {app: prometheus}}}]
       ports: [{port: 9090, protocol: TCP}]
+---
+# Alertmanager: receives alerts from Prometheus and e-mails them. Uses the Secret `alertmanager-config`
+# when it exists, otherwise the do-nothing default ConfigMap (see docs/RUNBOOK.md).
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: alertmanager, namespace: secureship}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector: {matchLabels: {app: alertmanager}}
+  template:
+    metadata: {labels: {app: alertmanager}}
+    spec:
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext: {runAsNonRoot: true, runAsUser: 65534, runAsGroup: 65534, fsGroup: 65534, seccompProfile: {type: RuntimeDefault}}
+      containers:
+        - name: alertmanager
+          image: prom/alertmanager:v0.27.0
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/sh", "-ec"]
+          args:
+            - |
+              if [ -f /etc/am-secret/alertmanager.yml ]; then cp /etc/am-secret/alertmanager.yml /tmp/am.yml; else cp /etc/am-default/alertmanager.yml /tmp/am.yml; fi
+              exec /bin/alertmanager --config.file=/tmp/am.yml --storage.path=/alertmanager --web.listen-address=:9093
+          ports: [{containerPort: 9093}]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: ["ALL"]}
+          readinessProbe: {httpGet: {path: /-/ready, port: 9093}, periodSeconds: 10}
+          livenessProbe: {httpGet: {path: /-/healthy, port: 9093}, initialDelaySeconds: 20, periodSeconds: 20}
+          resources:
+            requests: {cpu: 20m, memory: 32Mi}
+            limits: {memory: 128Mi}
+          volumeMounts:
+            - {name: default-config, mountPath: /etc/am-default, readOnly: true}
+            - {name: secret-config, mountPath: /etc/am-secret, readOnly: true}
+            - {name: tmp, mountPath: /tmp}
+            - {name: data, mountPath: /alertmanager}
+      volumes:
+        - {name: default-config, configMap: {name: alertmanager-config}}
+        - {name: secret-config, secret: {secretName: alertmanager-config, optional: true}}
+        - {name: tmp, emptyDir: {sizeLimit: 16Mi}}
+        - {name: data, emptyDir: {sizeLimit: 64Mi}}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: alertmanager, namespace: secureship}
+spec:
+  selector: {app: alertmanager}
+  ports: [{port: 9093, targetPort: 9093}]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: alertmanager-allow, namespace: secureship}
+spec:
+  podSelector: {matchLabels: {app: alertmanager}}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from: [{podSelector: {matchLabels: {app: prometheus}}}]
+      ports: [{port: 9093, protocol: TCP}]
+  egress:
+    - ports: [{port: 53, protocol: UDP}, {port: 53, protocol: TCP}]
+    - to: [{ipBlock: {cidr: 0.0.0.0/0, except: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16]}}]   # SMTP server
+      ports: [{port: 587, protocol: TCP}, {port: 465, protocol: TCP}]

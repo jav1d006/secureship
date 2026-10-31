@@ -44,6 +44,21 @@ Migrations live in `backend/app/migrations/versions/`. API and worker run `alemb
 | Apply by hand | `python -c "from app import db; db.init_db()"` |
 | Rollback | restore the pre-deploy backup (see above); migrations are forward-only |
 
+## Alerts by e-mail (Alertmanager)
+Prometheus evaluates `monitoring/rules.yml` and sends firing alerts to `alertmanager`. By default it sends nothing; configure a receiver with a Secret (your address and SMTP password never go into Git):
+```bash
+cp monitoring/alertmanager.email.example.yml alertmanager.email.yml   # fill the 3 CHANGE_ME values
+kubectl -n secureship create secret generic alertmanager-config --from-file=alertmanager.yml=alertmanager.email.yml
+kubectl -n secureship rollout restart deploy/alertmanager
+rm alertmanager.email.yml
+```
+| Check | Command |
+|---|---|
+| Alertmanager up | `kubectl -n secureship get deploy/alertmanager` |
+| Active alerts | `kubectl -n secureship port-forward svc/alertmanager 9093:9093` → http://localhost:9093 |
+| Test e-mail | scale the worker to 0 (`kubectl -n secureship scale deploy/worker --replicas=0`), upload a scan, wait for the queue alert, scale back to 1 |
+| Gmail | needs 2-step verification + an *app password* (not the account password) |
+
 ## E-mail the PDF report (optional)
 Off by default (the button is hidden until a server is configured). Any SMTP server works (provider, Gmail app password, your own relay).
 ```bash

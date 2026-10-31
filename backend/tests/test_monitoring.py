@@ -44,3 +44,22 @@ def test_prometheus_scrapes_the_api():
     cfg = yaml.safe_load((MON / "prometheus.yml").read_text())
     jobs = {j["job_name"]: j for j in cfg["scrape_configs"]}
     assert jobs["secureship-backend"]["static_configs"][0]["targets"] == ["backend:8000"]
+
+
+def test_kustomization_lists_every_manifest():
+    """Argo CD renders k8s/ through kustomization.yaml: an unlisted manifest would silently not deploy."""
+    import yaml
+    k8s = REPO / "k8s"
+    listed = set(yaml.safe_load((k8s / "kustomization.yaml").read_text())["resources"])
+    present = {p.name for p in k8s.glob("*.yaml") if p.name != "kustomization.yaml"}
+    assert listed == present
+
+
+def test_alertmanager_is_wired():
+    import yaml
+    prom = yaml.safe_load((MON / "prometheus.yml").read_text())
+    assert prom["alerting"]["alertmanagers"][0]["static_configs"][0]["targets"] == ["alertmanager:9093"]
+    default = yaml.safe_load((MON / "alertmanager.yml").read_text())
+    assert default["route"]["receiver"] in {r["name"] for r in default["receivers"]}
+    example = (MON / "alertmanager.email.example.yml").read_text()
+    assert "CHANGE_ME_APP_PASSWORD" in example and "CHANGE_ME_RECIPIENT" in example   # a template, never real credentials
