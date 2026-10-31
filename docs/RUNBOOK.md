@@ -33,3 +33,13 @@ Dump/restore round trip is verified in development. Redis holds only the queue; 
 
 ## API keys
 Created/revoked from a browser session: `POST/GET /api/v1/keys`, `DELETE /api/v1/keys/{id}` (max `MAX_API_KEYS`=5 active). A key acts as the session that created it. Revoke a leaked key at once; keys issued before this feature keep working until revoked by redeploying with a new owner (they are not listed).
+
+## Schema migrations (Alembic)
+Migrations live in `backend/app/migrations/versions/`. API and worker run `alembic upgrade head` at startup (serialised by a Postgres advisory lock), so a new revision is applied by the first pod that starts.
+
+| Task | Command (from `backend/`) |
+|---|---|
+| New migration | create `versions/000N_<name>.py` (copy `script.py.mako`; set `down_revision` to the previous id); use `IF NOT EXISTS` / reversible DDL |
+| Current revision | `kubectl -n secureship exec -i postgres-0 -- sh -c 'psql -U $POSTGRES_USER -d $POSTGRES_DB -c "select * from alembic_version"'` |
+| Apply by hand | `python -c "from app import db; db.init_db()"` |
+| Rollback | restore the pre-deploy backup (see above); migrations are forward-only |
