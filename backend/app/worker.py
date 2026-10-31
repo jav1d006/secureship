@@ -10,7 +10,7 @@ from redis import Redis
 from rq import Queue
 from rq.job import Job
 
-from . import config, db, logs
+from . import config, db, jobs, logs
 from .safezip import UnsafeArchive, safe_extract
 from .scanners import GROUPS, SCANNERS, TAKES_INVENTORY, detect, trivy_config
 from .scoring import overall_score
@@ -120,7 +120,8 @@ def harden_tree(root) -> None:
 
 def process(scan_id: str) -> None:
     os.umask(0o077)
-    scan_dir = config.WORK_DIR / scan_id
+    use_job = config.SANDBOX_MODE == "job"
+    scan_dir = (config.SANDBOX_WORK_DIR if use_job else config.WORK_DIR) / scan_id
     try:
         data = db.get_upload(scan_id)
         if data is None:
@@ -134,7 +135,11 @@ def process(scan_id: str) -> None:
                      max_bytes=config.MAX_UNZIPPED_MB * 1024 * 1024,
                      max_files=config.MAX_FILES)
         harden_tree(scan_dir / "src")
-        results, errors, skipped, timings = run_scanners(db.get_scanners(scan_id), scan_dir / "src")
+        names = db.get_scanners(scan_id)
+        if use_job:
+            results, errors, skipped, timings = jobs.run_in_job(scan_id, names, scan_dir)
+        else:
+            results, errors, skipped, timings = run_scanners(names, scan_dir / "src")
         if not results:
             why = "; ".join(errors.values()) or "; ".join(f"{k}: {v}" for k, v in skipped.items())
             raise RuntimeError(f"nothing was analysed ({why or 'no scanners selected'})")

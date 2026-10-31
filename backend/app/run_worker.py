@@ -14,6 +14,9 @@ def main() -> None:
         trivy._ensure_cache()
     except Exception as e:
         logging.getLogger("secureship.worker").warning("trivy cache warm-up skipped: %s", e)
+    if config.SANDBOX_MODE == "job":
+        from . import jobs
+        jobs.sweep()
     conn = Redis.from_url(config.REDIS_URL)
     Worker([Queue("scans", connection=conn)], connection=conn).work()
 

@@ -50,3 +50,14 @@ MAX_ATTEMPTS = int(os.getenv("MAX_ATTEMPTS", "3"))
 STUCK_AFTER_SEC = int(os.getenv("STUCK_AFTER_SEC", "900"))
 RETENTION_DAYS = int(os.getenv("RETENTION_DAYS", "30"))
 MAINTENANCE_INTERVAL_SEC = int(os.getenv("MAINTENANCE_INTERVAL_SEC", "300"))
+
+# --- Scan sandbox -------------------------------------------------------------------------
+# "local": scanners run inside the worker pod (default). "job": every scan runs in its own
+# Kubernetes Job with no network, no credentials and a read-only source mount (see docs/SANDBOX.md).
+SANDBOX_MODE = os.getenv("SANDBOX_MODE", "local")
+SANDBOX_IMAGE = os.getenv("SANDBOX_IMAGE", "ghcr.io/jav1d006/secureship-backend:latest")
+SANDBOX_NAMESPACE = os.getenv("SANDBOX_NAMESPACE", "secureship")
+SANDBOX_NODE = os.getenv("SANDBOX_NODE", "node1")                    # must match the node holding the shared volume
+SANDBOX_PVC = os.getenv("SANDBOX_PVC", "scan-work")
+SANDBOX_WORK_DIR = Path(os.getenv("SANDBOX_WORK_DIR", "/scan-work"))  # where the worker mounts that volume
+SANDBOX_JOB_TIMEOUT = int(os.getenv("SANDBOX_JOB_TIMEOUT", "600"))
