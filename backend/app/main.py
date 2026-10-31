@@ -12,7 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, PlainTextResponse, Response
 from prometheus_client import CONTENT_TYPE_LATEST, Counter, Gauge, Histogram, generate_latest
 
-from . import config, db, export, logs, worker
+from . import config, db, export, logs, mailer, report, worker
 from .scanners import META, SCANNERS
 from .security import client_ip, hit, limit_reads, limit_scans, new_token, session_owner
 from .upload import BadUpload, build_zip
@@ -243,7 +243,7 @@ def _owned(scan_id: str, who: str) -> dict:
 
 
 @v1.get("/scans/{scan_id}/export")
-def export_scan(scan_id: str, format: str = Query("sarif", pattern="^(sarif|json|csv)$"),
+def export_scan(scan_id: str, format: str = Query("sarif", pattern="^(sarif|json|csv|pdf)$"),
                 who: str = Depends(limit_reads)):
     scan = _owned(scan_id, who)
     if scan["status"] != "done":
@@ -254,7 +254,37 @@ def export_scan(scan_id: str, format: str = Query("sarif", pattern="^(sarif|json
     if format == "csv":
         return PlainTextResponse(export.to_csv(scan), media_type="text/csv",
                                  headers={"Content-Disposition": f'attachment; filename="secureship-{scan_id[:8]}.csv"'})
+    if format == "pdf":
+        return Response(report.to_pdf(scan), media_type="application/pdf",
+                        headers={"Content-Disposition": f'attachment; filename="secureship-{scan_id[:8]}.pdf"'})
     return scan
+
+
+@v1.get("/config")
+def public_config():
+    return {"email": mailer.enabled()}
+
+
+@v1.post("/scans/{scan_id}/email", status_code=202)
+def email_report(scan_id: str, request: Request, body: dict, who: str = Depends(limit_reads)):
+    """E-mail the PDF report to an address the user enters (only their own scan, rate limited)."""
+    if not mailer.enabled():
+        raise HTTPException(501, "e-mail is not configured on this server")
+    to = str(body.get("to", "")).strip().lower()
+    if not mailer.EMAIL_RE.match(to) or len(to) > 254:
+        raise HTTPException(400, "enter a valid e-mail address")
+    scan = _owned(scan_id, who)
+    if scan["status"] != "done":
+        raise HTTPException(409, "scan is not finished")
+    hit(f"rl:em:{who}", config.RATE_EMAILS_PER_HOUR, 3600, fail_open=False)
+    hit(f"rl:emi:{client_ip(request)}", config.RATE_EMAILS_PER_HOUR * 2, 3600, fail_open=False)
+    hit(f"rl:emt:{hashlib.sha256(to.encode()).hexdigest()}", 3, 3600, fail_open=False)   # never spam one inbox
+    try:
+        mailer.send_report(to, scan["filename"], scan["score"] or 0, report.to_pdf(scan))
+    except Exception:
+        log.exception("sending report e-mail failed")
+        raise HTTPException(502, "could not send the e-mail; try again later")
+    return {"status": "sent"}
 
 
 @v1.post("/scans/{scan_id}/share")

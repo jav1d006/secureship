@@ -61,3 +61,11 @@ SANDBOX_NODE = os.getenv("SANDBOX_NODE", "node1")                    # must matc
 SANDBOX_PVC = os.getenv("SANDBOX_PVC", "scan-work")
 SANDBOX_WORK_DIR = Path(os.getenv("SANDBOX_WORK_DIR", "/scan-work"))  # where the worker mounts that volume
 SANDBOX_JOB_TIMEOUT = int(os.getenv("SANDBOX_JOB_TIMEOUT", "600"))
+
+# --- E-mail (optional: unset SMTP_HOST disables "send report by e-mail") --------------------
+SMTP_HOST = os.getenv("SMTP_HOST", "")
+SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
+SMTP_USER = os.getenv("SMTP_USER", "")
+SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
+SMTP_FROM = os.getenv("SMTP_FROM", "SecureShip <noreply@localhost>")
+RATE_EMAILS_PER_HOUR = int(os.getenv("RATE_EMAILS_PER_HOUR", "5"))
