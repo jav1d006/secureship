@@ -31,14 +31,17 @@ def job_name(scan_id: str) -> str:
 
 def build_job(scan_id: str, names: list[str]) -> dict:
     labels = {"app": "scan-job"}
+    # Pinned to a node (lab), or, when SANDBOX_NODE is empty, scheduled next to the worker: both mount the same RWO volume.
+    placement = ({"nodeSelector": {"kubernetes.io/hostname": config.SANDBOX_NODE}} if config.SANDBOX_NODE else
+                 {"affinity": {"podAffinity": {"requiredDuringSchedulingIgnoredDuringExecution": [
+                     {"labelSelector": {"matchLabels": {"app": "worker"}}, "topologyKey": "kubernetes.io/hostname"}]}}})
     return {
         "apiVersion": "batch/v1", "kind": "Job",
         "metadata": {"name": job_name(scan_id), "namespace": config.SANDBOX_NAMESPACE, "labels": labels},
         "spec": {
             "backoffLimit": 0, "activeDeadlineSeconds": config.SANDBOX_JOB_TIMEOUT, "ttlSecondsAfterFinished": 300,
             "template": {"metadata": {"labels": labels}, "spec": {
-                "restartPolicy": "Never", "automountServiceAccountToken": False, "enableServiceLinks": False,
-                "nodeSelector": {"kubernetes.io/hostname": config.SANDBOX_NODE},
+                "restartPolicy": "Never", "automountServiceAccountToken": False, "enableServiceLinks": False, **placement,
                 "securityContext": {"runAsNonRoot": True, "runAsUser": 10001, "runAsGroup": 10001,
                                     "seccompProfile": {"type": "RuntimeDefault"}},
                 "containers": [{

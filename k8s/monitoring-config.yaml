@@ -9,6 +9,10 @@ data:
     global:
       scrape_interval: 15s
       evaluation_interval: 15s
+    alerting:
+      alertmanagers:
+        - static_configs:
+            - targets: ["alertmanager:9093"]
     rule_files:
       - /etc/prometheus/rules.yml
     scrape_configs:
@@ -90,6 +94,24 @@ data:
             labels: {severity: warning}
             annotations:
               summary: "p95 latency above 2s on {{ $labels.route }}"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: alertmanager-config
+  namespace: secureship
+data:
+  alertmanager.yml: |
+    # Default: alerts are evaluated and visible in Prometheus/Alertmanager but sent nowhere.
+    # To get e-mail, create the Secret `alertmanager-config` from alertmanager.email.example.yml (see docs/RUNBOOK.md).
+    route:
+      receiver: "null"
+      group_by: [alertname]
+      group_wait: 30s
+      group_interval: 5m
+      repeat_interval: 4h
+    receivers:
+      - name: "null"
 ---
 apiVersion: v1
 kind: ConfigMap
