@@ -23,7 +23,7 @@ spec:
             - {name: REDIS_URL, value: "redis://redis:6379/0"}
             - {name: WORK_DIR, value: /tmp/work}
             - {name: HOME, value: /tmp}
-            - {name: SANDBOX_MODE, value: local}   # set to "job" to run every scan in its own Job (docs/SANDBOX.md)
+            - {name: SANDBOX_MODE, value: job}   # every scan runs in its own Job (docs/SANDBOX.md); "local" = in-pod fallback
             - {name: SANDBOX_IMAGE, value: "ghcr.io/jav1d006/secureship-backend:latest"}
             - name: REDIS_PASSWORD
               valueFrom: {secretKeyRef: {name: redis-secret, key: REDIS_PASSWORD, optional: true}}
