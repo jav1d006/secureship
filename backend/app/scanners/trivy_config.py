@@ -5,8 +5,7 @@ from pathlib import Path
 
 from .. import config
 from .gitleaks import ScannerError
-from .trivy import CACHE, SEV, ORDER, _ensure_cache
-
+from .trivy import CACHE, ORDER, SEV, _ensure_cache
 
 _memo: dict[str, object] = {}
 _memo_lock = threading.Lock()

@@ -54,6 +54,9 @@ class ExportDB(FakeDB):
         r = self.rows.get(sid)
         return r if r and r["owner"] == owner else None
 
+    def resolve_key(self, h):
+        return None
+
     def share_scan(self, sid, owner, token):
         if not self.get_scan_owned(sid, owner):
             return None
@@ -72,6 +75,7 @@ def api(monkeypatch):
     db = ExportDB()
     monkeypatch.setattr(security, "_redis", FakeRedis())
     monkeypatch.setattr(main, "db", db)
+    monkeypatch.setattr(security, "db", db)
     c = TestClient(main.app)
     a, b = security.new_token(), security.new_token()
     sid = db.create_scan("p.zip", b"PK", ["code"], security.hashlib.sha256(a.encode()).hexdigest())

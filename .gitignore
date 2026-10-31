@@ -16,3 +16,4 @@ secrets/
 .venv/
 *.patch
 sbom-*.json
+.coverage

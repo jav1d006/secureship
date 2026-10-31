@@ -9,7 +9,8 @@ pytestmark = pytest.mark.skipif(not URL, reason="TEST_DATABASE_URL not set")
 
 @pytest.fixture
 def db(monkeypatch):
-    from app import config, db as dbmod
+    from app import config
+    from app import db as dbmod
     monkeypatch.setattr(config, "DATABASE_URL", URL)
     monkeypatch.setattr(dbmod, "_pool", None)
     dbmod.init_db()
@@ -97,3 +98,18 @@ def test_share_token_roundtrip(db):
     assert db.get_shared("A" * 22)["status"] == "queued" and db.get_shared("X" * 22) is None
     assert db.unshare_scan(sid, "bob") is False and db.unshare_scan(sid, "alice") is True
     assert db.get_shared("A" * 22) is None
+
+
+def test_api_key_lifecycle(db):
+    with db._conn() as c:
+        c.execute("DELETE FROM api_keys")
+    assert db.resolve_key("unknown") is None                      # legacy / stand-alone key
+    kid = db.create_key("alice", "h1", "ci", "ss_abcde", 2)
+    assert db.resolve_key("h1") == {"owner": "alice", "revoked": False}
+    assert db.create_key("alice", "h2", "x", "ss_x", 2)
+    assert db.create_key("alice", "h3", "y", "ss_y", 2) is None   # limit of active keys
+    assert [k["id"] for k in db.list_keys("bob")] == []
+    assert not db.revoke_key(kid, "bob")
+    assert db.revoke_key(kid, "alice")
+    assert db.resolve_key("h1")["revoked"] is True
+    assert db.create_key("alice", "h3", "y", "ss_y", 2)           # revoked key frees a slot

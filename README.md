@@ -77,7 +77,7 @@ flowchart LR
 **Request flow**
 
 1. The browser asks `GET /api/scanners` and renders one card per scanner.
-2. `POST /api/scans` (multipart: `file`, `scanners`) validates the input and stores the archive in PostgreSQL (`BYTEA`), then enqueues the scan ID in Redis (RQ).
+2. `POST /api/scans` (multipart: `file` .zip **or** repeated `files` with relative paths, plus `scanners`) validates the input and stores the archive in PostgreSQL (`BYTEA`), then enqueues the scan ID in Redis (RQ).
 3. A worker pops the job, writes the archive to an `emptyDir`, extracts it with a hardened unzip, runs each selected scanner (one failing scanner does not stop the others), computes the score and saves the result as `JSONB`.
 4. The upload and the temporary directory are deleted. The frontend polls `GET /api/scans/{id}` and renders the result.
 
@@ -234,8 +234,9 @@ Labels: **≥ 80** Excellent · **≥ 60** Good · **≥ 40** Needs improvement 
 | `GET` | `/ready` | Readiness (PostgreSQL + Redis) |
 | `GET` | `/api/docs` | OpenAPI UI |
 | `GET` | `/api/v1/scanners` | Scanner catalog (key, label, type, tool, description) |
-| `POST` | `/api/v1/keys` | Issue an API key (5/hour per IP); send as `X-API-Key` |
-| `POST` | `/api/v1/scans` | Multipart form: `file` (`.zip`), `scanners` (comma-separated keys). Returns `202 {"id", "status"}` |
+| `POST` | `/api/v1/keys` | Issue an API key (`{"name"}`; 5/hour per IP, max 5 active); send as `X-API-Key`. Acts as the creating session |
+| `GET` / `DELETE` | `/api/v1/keys` · `/api/v1/keys/{id}` | List / revoke your keys (browser session only) |
+| `POST` | `/api/v1/scans` | Multipart form: `file` (`.zip`) **or** `files` (many files / a folder, names = relative paths; max 1000 files), `scanners` (comma-separated keys). Returns `202 {"id", "status"}` |
 | `GET` | `/api/v1/scans` | Your scans (`limit`, `offset`) |
 | `GET` | `/api/v1/scans/{id}` | Status, score and findings (owner only) |
 | `DELETE` | `/api/v1/scans/{id}` | Delete a scan (owner only) |
@@ -263,6 +264,8 @@ backend/
     worker.py          RQ job: extract -> run scanners -> score -> store
     db.py              PostgreSQL access
     security.py        owner identity, API keys, rate limiting
+    upload.py          folder/file uploads → sanitised ZIP
+    logs.py            JSON logs + X-Request-ID
     config.py          environment settings
     safezip.py         hardened ZIP extraction
     scoring.py         score model
