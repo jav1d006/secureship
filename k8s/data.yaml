@@ -110,4 +110,4 @@ spec:
     matchExpressions: [{key: app, operator: In, values: [postgres, redis]}]
   policyTypes: [Ingress]
   ingress:
-    - from: [{podSelector: {matchExpressions: [{key: app, operator: In, values: [backend, worker]}]}}]
+    - from: [{podSelector: {matchExpressions: [{key: app, operator: In, values: [backend, worker, postgres-backup]}]}}]

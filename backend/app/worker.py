@@ -10,11 +10,12 @@ from redis import Redis
 from rq import Queue
 from rq.job import Job
 
-from . import config, db
+from . import config, db, logs
 from .safezip import UnsafeArchive, safe_extract
 from .scanners import GROUPS, SCANNERS, TAKES_INVENTORY, detect, trivy_config
 from .scoring import overall_score
 
+logs.setup()
 log = logging.getLogger("secureship.worker")
 
 _GATES = {"trivy": threading.Semaphore(1), "heavy": threading.Semaphore(max(1, config.HEAVY_CONCURRENCY))}

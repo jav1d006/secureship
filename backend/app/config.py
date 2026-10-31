@@ -36,6 +36,7 @@ def _redis_url() -> str:
 
 REDIS_URL = _redis_url()
 
+MAX_API_KEYS = int(os.getenv("MAX_API_KEYS", "5"))
 RATE_SCANS_PER_HOUR = int(os.getenv("RATE_SCANS_PER_HOUR", "10"))
 RATE_SCANS_PER_HOUR_IP = int(os.getenv("RATE_SCANS_PER_HOUR_IP", "30"))
 RATE_READS_PER_MIN = int(os.getenv("RATE_READS_PER_MIN", "240"))
