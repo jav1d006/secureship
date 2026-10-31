@@ -42,7 +42,7 @@ export default function Keys() {
   return (
     <main className="wrap" id="main">
       <div className="pagehead">
-        <div>
+        <div className="glass">
           <h1>API keys</h1>
           <p className="lead" style={{ marginTop: 10 }}>Scan from CI or a script. Scans started with a key appear in your History.</p>
         </div>

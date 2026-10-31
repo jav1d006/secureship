@@ -1,5 +1,6 @@
 import "./globals.css";
 import Header from "./components/Header";
+import Harbor from "./components/Harbor";
 
 export const metadata = {
   title: "SecureShip — open-source security scanner",
@@ -11,6 +12,7 @@ export default function RootLayout({ children }) {
   return (
     <html lang="en">
       <body>
+        <Harbor />
         <a className="skip" href="#main">Skip to content</a>
         <Header />
         {children}
