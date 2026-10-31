@@ -1,9 +1,10 @@
 "use client";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { scoreColor, scoreLabel } from "./lib";
 
 const SEV = ["critical", "high", "medium", "low"];
-const SEV_COLOR = { critical: "#b91c1c", high: "#ef4444", medium: "#f59e0b", low: "#3b82f6" };
-const ICON = { secrets: "🔑", dependencies: "📦", code: "🧩", iac: "🏗️", docker: "🐳" };
+const SEV_COLOR = { critical: "var(--crit)", high: "var(--high)", medium: "var(--med)", low: "var(--low)" };
+
 const SKIP = new Set(["node_modules", ".git", ".next", "dist", "build", "__pycache__", ".venv", "venv", ".terraform", ".idea", ".mypy_cache"]);
 const MAX_FILES = 1000, MAX_BYTES = 25 * 1024 * 1024;
 const skipped = (path) => path.split("/").slice(0, -1).some((d) => SKIP.has(d));
@@ -22,24 +23,27 @@ async function walk(entry, base, out) {
   }
 }
 
-const scoreColor = (s) => (s >= 80 ? "#22c55e" : s >= 60 ? "#84cc16" : s >= 40 ? "#f59e0b" : "#ef4444");
-const scoreLabel = (s) => (s >= 80 ? "Excellent" : s >= 60 ? "Good" : s >= 40 ? "Needs improvement" : "Poor");
 
-function Ring({ value }) {
+function Seal({ value }) {
   const [v, setV] = useState(0);
   useEffect(() => {
-    const t = setTimeout(() => setV(value), 50);
+    const t = setTimeout(() => setV(value), 60);
     return () => clearTimeout(t);
   }, [value]);
-  const r = 62, c = 2 * Math.PI * r;
+  const r = 70, c = 2 * Math.PI * r;
+  const ticks = Array.from({ length: 60 }, (_, i) => i);
   return (
-    <svg width="160" height="160" viewBox="0 0 160 160" role="img" aria-label={`Security score ${value} out of 100`}>
-      <circle cx="80" cy="80" r={r} fill="none" stroke="var(--line)" strokeWidth="14" />
-      <circle cx="80" cy="80" r={r} fill="none" stroke={scoreColor(value)} strokeWidth="14" strokeLinecap="round"
-        strokeDasharray={c} strokeDashoffset={c * (1 - v / 100)} transform="rotate(-90 80 80)"
-        style={{ transition: "stroke-dashoffset .9s ease" }} />
-      <text x="80" y="88" textAnchor="middle" fontSize="40" fontWeight="800" fill="currentColor">{value}</text>
-      <text x="80" y="110" textAnchor="middle" fontSize="12" fill="var(--muted)">/ 100</text>
+    <svg width="180" height="180" viewBox="0 0 180 180" role="img" aria-label={`Security score ${value} out of 100`}>
+      {ticks.map((i) => (
+        <line key={i} x1="90" y1="6" x2="90" y2={i % 5 === 0 ? 15 : 11} stroke="var(--line)" strokeWidth={i % 5 === 0 ? 2 : 1}
+          transform={`rotate(${i * 6} 90 90)`} />
+      ))}
+      <circle cx="90" cy="90" r={r} fill="none" stroke="var(--line)" strokeWidth="9" />
+      <circle cx="90" cy="90" r={r} fill="none" stroke={scoreColor(value)} strokeWidth="9" strokeLinecap="butt"
+        strokeDasharray={c} strokeDashoffset={c * (1 - v / 100)} transform="rotate(-90 90 90)"
+        style={{ transition: "stroke-dashoffset .9s cubic-bezier(.2,.8,.2,1)" }} />
+      <text x="90" y="100" textAnchor="middle" fontSize="54" fontWeight="800" fill="currentColor" letterSpacing="-2">{value}</text>
+      <text x="90" y="124" textAnchor="middle" fontSize="12" fontWeight="700" fill="var(--muted)">OUT OF 100</text>
     </svg>
   );
 }
@@ -63,8 +67,10 @@ export default function Home() {
       .then((r) => r.json())
       .then((d) => { setCatalog(d); setPicked(d.map((s) => s.key)); })
       .catch(() => setErr("Cannot reach the API"));
+    const id = new URLSearchParams(window.location.search).get("scan");
+    if (id && /^[0-9a-f]{32}$/.test(id)) { setBusy(true); poll(id); }
     return () => clearTimeout(timer.current);
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const toggle = (k) => setPicked((p) => (p.includes(k) ? p.filter((x) => x !== k) : [...p, k]));
   const meta = (k) => catalog.find((s) => s.key === k);
@@ -136,27 +142,18 @@ export default function Home() {
 
   return (
     <>
-      <header className="top">
-        <div className="logo" aria-hidden>
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3l8 3v6c0 5-3.4 8.4-8 9-4.6-.6-8-4-8-9V6l8-3z" /><path d="M9 12l2 2 4-4" /></svg>
-        </div>
-        <span className="brand">SecureShip</span>
-        <span className="pill">Open source · MIT</span>
-      </header>
+      <main className="wrap">
+        <h1>Check your code before it ships.</h1>
+        <p className="lead">Upload a project, pick the scanners and get a 0–100 security score with every finding explained.</p>
 
-      <main>
-        <h1>Ship <span className="grad">secure code</span>, faster.</h1>
-        <p className="lead">Pick your scanners, upload a folder, files or a .zip and get a security score in seconds. Your code is scanned statically and never executed.</p>
-
-        <h2>1 · Choose scanners</h2>
+        <h2><span className="n">1</span>Choose scanners</h2>
         <div className="grid">
           {catalog.map((s) => {
             const on = picked.includes(s.key);
             return (
-              <button key={s.key} type="button" className={`card sc ${on ? "on" : ""}`} aria-pressed={on} onClick={() => toggle(s.key)}>
-                <span className="chk">{on ? "✓" : ""}</span>
-                <span className="ic">{ICON[s.key] || "🛡️"}</span>
+              <button key={s.key} type="button" className={`sc ${on ? "on" : ""}`} aria-pressed={on} onClick={() => toggle(s.key)}>
                 <b>{s.label}</b>
+                <span className="chk" aria-hidden>{on ? "✓" : ""}</span>
                 <small>{s.description}</small>
                 <span className="badge">{s.type} · {s.tool}</span>
               </button>
@@ -164,7 +161,7 @@ export default function Home() {
           })}
         </div>
 
-        <h2>2 · Upload project</h2>
+        <h2><span className="n">2</span>Add your project</h2>
         <div className={`card dz ${drag ? "drag" : ""}`} role="button" tabIndex={0}
           onClick={() => input.current?.click()}
           onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && input.current?.click()}
@@ -173,35 +170,34 @@ export default function Home() {
           onDrop={onDrop}>
           <input ref={input} type="file" multiple hidden onChange={fromInput} />
           <input ref={dirInput} type="file" webkitdirectory="" directory="" hidden onChange={fromInput} />
-          <div className="big">📁</div>
+          <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z" /></svg>
           <b>{items.length ? label : "Drop a folder, files or a .zip here"}</b>
-          <div className="muted">{items.length ? `${(bytes / 1024 / 1024).toFixed(2)} MB` : "Max 25 MB · node_modules, .git and build folders are skipped"}</div>
-          <div className="row" style={{ gap: 8, justifyContent: "center", marginTop: 10 }} onClick={(e) => e.stopPropagation()}>
-            <button type="button" className="chip" onClick={() => input.current?.click()}>Choose files / .zip</button>
-            <button type="button" className="chip" onClick={() => dirInput.current?.click()}>Choose folder</button>
+          <div className="muted small">{items.length ? `${(bytes / 1024 / 1024).toFixed(2)} MB` : "Up to 25 MB. node_modules, .git and build folders are skipped."}</div>
+          <div className="row" style={{ gap: 8, justifyContent: "center", marginTop: 14 }} onClick={(e) => e.stopPropagation()}>
+            <button type="button" className="chip" onClick={() => input.current?.click()}>Files or .zip</button>
+            <button type="button" className="chip" onClick={() => dirInput.current?.click()}>Folder</button>
           </div>
         </div>
-        <button className="btn" disabled={!ready} onClick={start}>
-          {busy ? <><span className="spin" />Scanning…</> : "Run scan →"}
-        </button>
-        {err && <p className="err">{err}</p>}
-        {picked.length === 0 && <p className="muted">Select at least one scanner.</p>}
-
-        {scan && scan.status !== "done" && scan.status !== "failed" && (
-          <p className="muted"><span className="spin" />Status: {scan.status}…</p>
-        )}
-        {scan?.status === "failed" && <p className="err">Scan failed: {scan.error}</p>}
+        <div className="runbar">
+          <button className="btn" disabled={!ready} onClick={start}>
+            {busy ? <><span className="spin" />Scanning</> : "Run scan"}
+          </button>
+          {picked.length === 0 && <span className="muted small">Select at least one scanner.</span>}
+          {scan && scan.status !== "done" && scan.status !== "failed" && <span className="muted small">Status: {scan.status}</span>}
+        </div>
+        {err && <p className="err" role="alert">{err}</p>}
+        {scan?.status === "failed" && <p className="err" role="alert">Scan failed: {scan.error}</p>}
 
         {scan?.status === "done" && (
           <section className="card res">
             <div className="row">
-              <Ring value={scan.score} />
+              <Seal value={scan.score} />
               <div className="mods">
-                <h3 style={{ margin: 0, fontSize: 26 }}>{scoreLabel(scan.score)}</h3>
-                <div className="muted">{scan.filename}</div>
+                <div className="verdict" style={{ color: scoreColor(scan.score) }}>{scoreLabel(scan.score)}</div>
+                <div className="muted small mono">{scan.filename}</div>
                 {Object.entries(result.modules || {}).map(([m, s]) => (
                   <div className="mod" key={m}>
-                    <div className="h"><span>{ICON[m]} {meta(m)?.label || m} <span className="muted">· {meta(m)?.tool}</span></span><b>{s}</b></div>
+                    <div className="h"><span>{meta(m)?.label || m} <span className="muted">· {meta(m)?.tool}</span></span><b>{s}</b></div>
                     <div className="bar"><i style={{ width: `${s}%`, background: scoreColor(s) }} /></div>
                   </div>
                 ))}
@@ -214,7 +210,7 @@ export default function Home() {
 
             {Object.entries(result.skipped || {}).map(([k, msg]) => (
               <div className="muted" key={k} style={{ fontSize: 13, margin: "4px 0" }}>
-                ⏭ {meta(k)?.label || k} skipped: {msg}
+                {meta(k)?.label || k} skipped: {msg}
               </div>
             ))}
 
@@ -222,12 +218,12 @@ export default function Home() {
               <button className={`chip ${filter === "all" ? "on" : ""}`} onClick={() => { setFilter("all"); setLimit(30); }}>All ({all.length})</button>
               {SEV.filter((s) => counts[s]).map((s) => (
                 <button key={s} className={`chip ${filter === s ? "on" : ""}`} onClick={() => { setFilter(s); setLimit(30); }}>
-                  <span style={{ color: filter === s ? "#fff" : SEV_COLOR[s] }}>●</span> {s} ({counts[s]})
+                  <span style={{ color: filter === s ? "inherit" : SEV_COLOR[s] }}>●</span> {s} ({counts[s]})
                 </button>
               ))}
             </div>
 
-            {all.length === 0 && <p className="muted">🎉 No issues found.</p>}
+            {all.length === 0 && <p className="muted">No issues found by the selected scanners.</p>}
             {shown.slice(0, limit).map((f, i) => (
               <div className="f" key={i}>
                 <span className="tag" style={{ background: SEV_COLOR[f.severity] }}>{f.severity}</span>
@@ -237,15 +233,12 @@ export default function Home() {
               </div>
             ))}
             {shown.length > limit && (
-              <button className="btn" style={{ marginTop: 12 }} onClick={() => setLimit(limit + 50)}>Show more ({shown.length - limit} left)</button>
+              <button className="btn ghost" style={{ marginTop: 12 }} onClick={() => setLimit(limit + 50)}>Show more ({shown.length - limit} left)</button>
             )}
           </section>
         )}
       </main>
 
-      <footer>
-        Designed &amp; built by <b>Javid Mamedov</b> · SecureShip is open source (MIT)
-      </footer>
     </>
   );
 }
