@@ -1,9 +1,8 @@
 import json
-import os
 import subprocess
 from pathlib import Path
 
-from .. import config
+from .. import config, sandbox
 from . import detect
 from .gitleaks import ScannerError
 
@@ -36,12 +35,12 @@ def run(path: Path, inv=None) -> dict:
     """IaC / CI-config policy scan with Checkov (parses files only; offline, nothing is executed)."""
     if not _has_config_files(path):
         return {"findings": []}
-    env = {**os.environ, "HOME": "/tmp", "BC_SKIP_MAPPING": "TRUE", "CHECKOV_RUN_SCA_PACKAGE_SCAN_V2": "false"}
+    env = {"BC_SKIP_MAPPING": "TRUE", "CHECKOV_RUN_SCA_PACKAGE_SCAN_V2": "false"}
     frameworks = detect.checkov_frameworks(inv) if inv is not None else FRAMEWORKS
     cmd = [config.CHECKOV_BIN, "-d", str(path), "--framework", frameworks,
            "--quiet", "--compact", "-o", "json", "--skip-download", "--skip-path", "node_modules", "--skip-path", "vendor"]
     try:
-        proc = subprocess.run(cmd, capture_output=True, text=True, env=env, timeout=config.SCAN_TIMEOUT_SEC)
+        proc = sandbox.run(cmd, config.SCAN_TIMEOUT_SEC, env)
     except FileNotFoundError as e:
         raise ScannerError("checkov binary not found") from e
     except subprocess.TimeoutExpired as e:

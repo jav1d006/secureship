@@ -3,7 +3,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
-from .. import config
+from .. import config, sandbox
 from .gitleaks import ScannerError
 
 DB_SRC = Path("/opt/trivy-cache")      # vulnerability DB baked into the image
@@ -31,7 +31,7 @@ def run(path: Path) -> dict:
         "--skip-dirs", "**/node_modules", "--skip-dirs", "**/.git", str(path),
     ]
     try:
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=config.SCAN_TIMEOUT_SEC)
+        proc = sandbox.run(cmd, config.SCAN_TIMEOUT_SEC)
     except FileNotFoundError as e:
         raise ScannerError("trivy binary not found") from e
     except subprocess.TimeoutExpired as e:
