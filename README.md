@@ -19,11 +19,13 @@
 
 ## What is SecureShip?
 
-SecureShip is a small, self-hosted security scanner built for teams that have no dedicated security engineer. You choose the scanners you want, upload your project as a ZIP archive, and SecureShip returns:
+SecureShip is a small, self-hosted security scanner built for teams that have no dedicated security engineer. You choose the scanners you want, upload a folder, files or a ZIP archive, and SecureShip returns:
 
 - a **Security Score (0–100)** with a per-module breakdown,
 - a **severity-filtered list of findings** (file, line, rule, description, fixed version when known),
 - the result of each tool, even if another tool fails.
+
+The web UI has three pages: **Scan** (choose scanners, drop a folder/files/ZIP), **History** (reopen or delete earlier scans) and **API keys** (create, copy once, revoke).
 
 > **Your code is only extracted and statically analysed. It is never executed or imported.** Secrets that are found are redacted, and the uploaded archive is deleted as soon as the scan finishes.
 
