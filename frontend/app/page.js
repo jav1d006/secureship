@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { scoreColor, scoreLabel, api } from "./lib";
+import Cargo from "./components/Cargo";
 
 const SEV = ["critical", "high", "medium", "low"];
 const SEV_COLOR = { critical: "var(--crit)", high: "var(--high)", medium: "var(--med)", low: "var(--low)" };
@@ -193,8 +194,13 @@ export default function Home() {
   return (
     <>
       <main className="wrap" id="main">
-        <h1>Check your code before it ships.</h1>
-        <p className="lead">Upload a project, pick the scanners and get a 0–100 security score with every finding explained.</p>
+        <section className="hero">
+          <div>
+            <h1>Check your code before it ships.</h1>
+            <p className="lead">Upload a project, pick the scanners and get a 0–100 security score with every finding explained.</p>
+          </div>
+          <Cargo state={scan?.status === "done" ? "done" : busy ? "scanning" : "idle"} counts={counts} />
+        </section>
 
         <h2><span className="n">1</span>Choose scanners</h2>
         <div className="chips" style={{ margin: "0 0 12px" }} role="group" aria-label="Scanner presets">
