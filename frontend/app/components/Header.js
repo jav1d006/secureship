@@ -1,11 +1,20 @@
 "use client";
 import { usePathname } from "next/navigation";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 
 const LINKS = [["/", "Scan"], ["/history", "History"], ["/keys", "API keys"]];
 
 export default function Header() {
   const path = usePathname();
+  const [theme, setTheme] = useState("system");
+  useEffect(() => { try { setTheme(localStorage.getItem("theme") || "system"); } catch {} }, []);
+  useEffect(() => {
+    const el = document.documentElement;
+    if (theme === "system") el.removeAttribute("data-theme"); else el.setAttribute("data-theme", theme);
+    try { localStorage.setItem("theme", theme); } catch {}
+  }, [theme]);
+  const next = { system: "light", light: "dark", dark: "system" }[theme];
   return (
     <header className="top">
       <div className="wrap">
@@ -20,6 +29,7 @@ export default function Header() {
             <Link key={href} href={href} aria-current={path === href ? "page" : undefined}>{label}</Link>
           ))}
         </nav>
+        <button className="theme" style={{ marginLeft: "auto" }} onClick={() => setTheme(next)} title={`Theme: ${theme}. Click for ${next}`} aria-label={`Theme: ${theme}. Switch to ${next}`}>{{ system: "Auto", light: "Light", dark: "Dark" }[theme]}</button>
         <a className="gh" href="https://github.com/jav1d006/secureship" rel="noopener noreferrer">GitHub</a>
       </div>
     </header>

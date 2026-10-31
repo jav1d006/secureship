@@ -1,4 +1,4 @@
-export const scoreColor = (s) => (s >= 80 ? "var(--ok)" : s >= 60 ? "#65a30d" : s >= 40 ? "var(--med)" : "var(--crit)");
+export const scoreColor = (s) => (s >= 80 ? "var(--ok)" : s >= 60 ? "var(--good)" : s >= 40 ? "var(--med)" : "var(--crit)");
 export const scoreLabel = (s) => (s >= 80 ? "Excellent" : s >= 60 ? "Good" : s >= 40 ? "Needs work" : "Poor");
 
 export function ago(iso) {

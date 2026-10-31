@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { scoreColor, scoreLabel } from "./lib";
+import { scoreColor, scoreLabel, api } from "./lib";
 
 const SEV = ["critical", "high", "medium", "low"];
 const SEV_COLOR = { critical: "var(--crit)", high: "var(--high)", medium: "var(--med)", low: "var(--low)" };
@@ -58,6 +58,12 @@ export default function Home() {
   const [busy, setBusy] = useState(false);
   const [filter, setFilter] = useState("all");
   const [limit, setLimit] = useState(30);
+  const [q, setQ] = useState("");
+  const [share, setShare] = useState(null);
+  const [note, setNote] = useState("");
+  const [confirmDel, setConfirmDel] = useState(false);
+  const [t0, setT0] = useState(0);
+  const [, tick] = useState(0);
   const timer = useRef(null);
   const input = useRef(null);
   const dirInput = useRef(null);
@@ -71,6 +77,34 @@ export default function Home() {
     if (id && /^[0-9a-f]{32}$/.test(id)) { setBusy(true); poll(id); }
     return () => clearTimeout(timer.current);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!busy) return;
+    const i = setInterval(() => tick((n) => n + 1), 1000);
+    return () => clearInterval(i);
+  }, [busy]);
+  const flash = (m) => { setNote(m); setTimeout(() => setNote(""), 2200); };
+  const copy = async (text) => { try { await navigator.clipboard.writeText(text); flash("Copied"); } catch { flash("Copy failed"); } };
+  const PRESETS = [
+    ["All", () => catalog.map((s) => s.key)],
+    ["Quick", () => ["secrets", "code", "shell"].filter((k) => catalog.some((s) => s.key === k))],
+    ["Secrets only", () => ["secrets"]],
+    ["None", () => []],
+  ];
+  async function doShare() {
+    try {
+      const d = await api(`/scans/${scan.id}/share`, { method: "POST" });
+      setShare(`![security](${window.location.origin}${d.badge_url})`);
+    } catch (e) { setErr(e.message); }
+  }
+  async function unshare() {
+    try { await api(`/scans/${scan.id}/share`, { method: "DELETE" }); setShare(null); flash("Badge link revoked"); }
+    catch (e) { setErr(e.message); }
+  }
+  async function removeScan() {
+    try { await api(`/scans/${scan.id}`, { method: "DELETE" }); setScan(null); setShare(null); setConfirmDel(false); flash("Scan deleted"); }
+    catch (e) { setErr(e.message); }
+  }
 
   const toggle = (k) => setPicked((p) => (p.includes(k) ? p.filter((x) => x !== k) : [...p, k]));
   const meta = (k) => catalog.find((s) => s.key === k);
@@ -89,7 +123,7 @@ export default function Home() {
 
   async function start() {
     clearTimeout(timer.current);
-    setErr(""); setScan(null); setBusy(true); setFilter("all"); setLimit(30);
+    setErr(""); setScan(null); setShare(null); setQ(""); setT0(Date.now()); setBusy(true); setFilter("all"); setLimit(30);
     const body = new FormData();
     if (items.length === 1 && items[0].path.toLowerCase().endsWith(".zip")) body.append("file", items[0].f);
     else items.forEach(({ f, path }) => body.append("files", f, path));
@@ -137,16 +171,26 @@ export default function Home() {
       .sort((a, b) => SEV.indexOf(a.severity) - SEV.indexOf(b.severity));
   }, [result]);
   const counts = useMemo(() => Object.fromEntries(SEV.map((s) => [s, all.filter((f) => f.severity === s).length])), [all]);
-  const shown = all.filter((f) => filter === "all" || f.severity === filter);
+  const needle = q.trim().toLowerCase();
+  const shown = all.filter((f) => (filter === "all" || f.severity === filter) &&
+    (!needle || `${f.rule} ${f.file} ${f.description} ${f.module}`.toLowerCase().includes(needle)));
   const ready = items.length > 0 && picked.length > 0 && !busy;
 
   return (
     <>
-      <main className="wrap">
+      <main className="wrap" id="main">
         <h1>Check your code before it ships.</h1>
         <p className="lead">Upload a project, pick the scanners and get a 0–100 security score with every finding explained.</p>
 
         <h2><span className="n">1</span>Choose scanners</h2>
+        <div className="chips" style={{ margin: "0 0 12px" }} role="group" aria-label="Scanner presets">
+          {PRESETS.map(([label, fn]) => {
+            const want = fn();
+            const on = want.length === picked.length && want.every((k) => picked.includes(k));
+            return <button key={label} type="button" className={`chip ${on ? "on" : ""}`} onClick={() => setPicked(want)}>{label}</button>;
+          })}
+          <span className="muted small" style={{ alignSelf: "center" }}>{picked.length} of {catalog.length} selected</span>
+        </div>
         <div className="grid">
           {catalog.map((s) => {
             const on = picked.includes(s.key);
@@ -162,9 +206,8 @@ export default function Home() {
         </div>
 
         <h2><span className="n">2</span>Add your project</h2>
-        <div className={`card dz ${drag ? "drag" : ""}`} role="button" tabIndex={0}
+        <div className={`card dz ${drag ? "drag" : ""}`} aria-label="Drop zone"
           onClick={() => input.current?.click()}
-          onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && input.current?.click()}
           onDragOver={(e) => { e.preventDefault(); setDrag(true); }}
           onDragLeave={() => setDrag(false)}
           onDrop={onDrop}>
@@ -183,7 +226,14 @@ export default function Home() {
             {busy ? <><span className="spin" />Scanning</> : "Run scan"}
           </button>
           {picked.length === 0 && <span className="muted small">Select at least one scanner.</span>}
-          {scan && scan.status !== "done" && scan.status !== "failed" && <span className="muted small">Status: {scan.status}</span>}
+          {busy && scan && scan.status !== "done" && scan.status !== "failed" && (
+            <span className="steps" aria-live="polite">
+              <i className="on">Uploaded</i>
+              <i className={scan.status === "running" ? "on" : ""}>{scan.status === "running" ? "Scanning" : "Queued"}</i>
+              <i>Results</i>
+              <span className="muted small mono">{Math.max(0, Math.round((Date.now() - t0) / 1000))}s</span>
+            </span>
+          )}
         </div>
         {err && <p className="err" role="alert">{err}</p>}
         {scan?.status === "failed" && <p className="err" role="alert">Scan failed: {scan.error}</p>}
@@ -214,6 +264,29 @@ export default function Home() {
               </div>
             ))}
 
+            <div className="toolbar">
+              <span className="muted small">
+                {result.timings ? `Scanned in ${Object.values(result.timings).reduce((a, b) => Math.max(a, b), 0).toFixed(0)}s` : ""}
+              </span>
+              <span className="grow" />
+              {["sarif", "csv", "json"].map((f) => (
+                <a key={f} className="btn ghost sm" href={`/api/v1/scans/${scan.id}/export?format=${f}`} download>{f.toUpperCase()}</a>
+              ))}
+              <button className="btn ghost sm" onClick={doShare}>Badge</button>
+              {confirmDel ? (
+                <><button className="btn danger sm" onClick={removeScan}>Delete scan</button><button className="btn ghost sm" onClick={() => setConfirmDel(false)}>Cancel</button></>
+              ) : <button className="btn ghost sm" onClick={() => setConfirmDel(true)}>Delete</button>}
+            </div>
+            {share && (
+              <div className="reveal" style={{ padding: 14, margin: "12px 0 0" }}>
+                <div className="muted small">Public badge: anyone with the link sees only the score. Paste into a README:</div>
+                <div className="secret" style={{ margin: "8px 0 0" }}>
+                  <code>{share}</code>
+                  <button className="btn sm" onClick={() => copy(share)}>Copy</button>
+                  <button className="btn danger sm" onClick={unshare}>Revoke</button>
+                </div>
+              </div>
+            )}
             <div className="chips">
               <button className={`chip ${filter === "all" ? "on" : ""}`} onClick={() => { setFilter("all"); setLimit(30); }}>All ({all.length})</button>
               {SEV.filter((s) => counts[s]).map((s) => (
@@ -223,14 +296,22 @@ export default function Home() {
               ))}
             </div>
 
+            {all.length > 0 && (
+              <input className="text" style={{ width: "100%", margin: "10px 0 6px" }} type="search" value={q} aria-label="Search findings"
+                placeholder="Search by rule, file or description" onChange={(e) => { setQ(e.target.value); setLimit(30); }} />
+            )}
             {all.length === 0 && <p className="muted">No issues found by the selected scanners.</p>}
+            {all.length > 0 && shown.length === 0 && <p className="muted">No findings match your filters.</p>}
             {shown.slice(0, limit).map((f, i) => (
-              <div className="f" key={i}>
-                <span className="tag" style={{ background: SEV_COLOR[f.severity] }}>{f.severity}</span>
-                <b>{f.rule}</b> <span className="muted">· {meta(f.module)?.tool}</span>
-                <div><code>{f.file}{f.line ? `:${f.line}` : ""}</code></div>
-                <div className="muted">{f.description}</div>
-              </div>
+              <details className="f" key={i}>
+                <summary>
+                  <span className="tag" style={{ background: SEV_COLOR[f.severity] }}>{f.severity}</span>
+                  <b>{f.rule}</b> <span className="muted">· {meta(f.module)?.tool}</span>
+                  <code className="loc">{f.file}{f.line ? `:${f.line}` : ""}</code>
+                </summary>
+                <div className="muted" style={{ margin: "8px 0" }}>{f.description || "No description provided."}</div>
+                <button type="button" className="btn ghost sm" onClick={() => copy(`${f.file}${f.line ? `:${f.line}` : ""}`)}>Copy location</button>
+              </details>
             ))}
             {shown.length > limit && (
               <button className="btn ghost" style={{ marginTop: 12 }} onClick={() => setLimit(limit + 50)}>Show more ({shown.length - limit} left)</button>
@@ -239,6 +320,7 @@ export default function Home() {
         )}
       </main>
 
+    {note && <div className="toast" role="status">{note}</div>}
     </>
   );
 }
