@@ -58,3 +58,14 @@ rm alertmanager.email.yml
 | Active alerts | `kubectl -n secureship port-forward svc/alertmanager 9093:9093` → http://localhost:9093 |
 | Test e-mail | scale the worker to 0 (`kubectl -n secureship scale deploy/worker --replicas=0`), upload a scan, wait for the queue alert, scale back to 1 |
 | Gmail | needs 2-step verification + an *app password* (not the account password) |
+
+## E-mail the PDF report (optional)
+Off by default (the button is hidden until a server is configured). Any SMTP server works (provider, Gmail app password, your own relay).
+```bash
+kubectl -n secureship create secret generic smtp-secret \
+  --from-literal=SMTP_HOST=smtp.example.com --from-literal=SMTP_PORT=587 \
+  --from-literal=SMTP_USER=apikey --from-literal=SMTP_PASSWORD='***' \
+  --from-literal=SMTP_FROM='SecureShip <reports@example.com>'
+kubectl -n secureship rollout restart deploy/backend
+```
+Limits per hour: 5 per scan owner, 10 per IP, 3 per recipient address (`RATE_EMAILS_PER_HOUR`). Only the owner's own finished scan can be sent.
