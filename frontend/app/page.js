@@ -62,6 +62,10 @@ export default function Home() {
   const [share, setShare] = useState(null);
   const [note, setNote] = useState("");
   const [confirmDel, setConfirmDel] = useState(false);
+  const [mailOn, setMailOn] = useState(false);
+  const [mailOpen, setMailOpen] = useState(false);
+  const [mailTo, setMailTo] = useState("");
+  const [mailBusy, setMailBusy] = useState(false);
   const [t0, setT0] = useState(0);
   const [, tick] = useState(0);
   const timer = useRef(null);
@@ -69,6 +73,7 @@ export default function Home() {
   const dirInput = useRef(null);
 
   useEffect(() => {
+    api("/config").then((c) => setMailOn(!!c.email)).catch(() => {});
     fetch("/api/v1/scanners")
       .then((r) => r.json())
       .then((d) => { setCatalog(d); setPicked(d.map((s) => s.key)); })
@@ -91,6 +96,15 @@ export default function Home() {
     ["Secrets only", () => ["secrets"]],
     ["None", () => []],
   ];
+  async function sendMail(e) {
+    e.preventDefault();
+    setMailBusy(true); setErr("");
+    try {
+      await api(`/scans/${scan.id}/email`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ to: mailTo.trim() }) });
+      flash(`Report sent to ${mailTo.trim()}`); setMailOpen(false); setMailTo("");
+    } catch (e2) { setErr(e2.message); }
+    setMailBusy(false);
+  }
   async function doShare() {
     try {
       const d = await api(`/scans/${scan.id}/share`, { method: "POST" });
@@ -269,14 +283,22 @@ export default function Home() {
                 {result.timings ? `Scanned in ${Object.values(result.timings).reduce((a, b) => Math.max(a, b), 0).toFixed(0)}s` : ""}
               </span>
               <span className="grow" />
-              {["sarif", "csv", "json"].map((f) => (
+              {["pdf", "sarif", "csv", "json"].map((f) => (
                 <a key={f} className="btn ghost sm" href={`/api/v1/scans/${scan.id}/export?format=${f}`} download>{f.toUpperCase()}</a>
               ))}
+              {mailOn && <button className="btn ghost sm" onClick={() => setMailOpen(!mailOpen)} aria-expanded={mailOpen}>E-mail PDF</button>}
               <button className="btn ghost sm" onClick={doShare}>Badge</button>
               {confirmDel ? (
                 <><button className="btn danger sm" onClick={removeScan}>Delete scan</button><button className="btn ghost sm" onClick={() => setConfirmDel(false)}>Cancel</button></>
               ) : <button className="btn ghost sm" onClick={() => setConfirmDel(true)}>Delete</button>}
             </div>
+            {mailOpen && (
+              <form className="form" style={{ margin: "0 0 12px" }} onSubmit={sendMail}>
+                <input className="text" type="email" required value={mailTo} onChange={(e) => setMailTo(e.target.value)}
+                  placeholder="name@company.com" aria-label="Send the PDF report to this e-mail address" autoComplete="email" />
+                <button className="btn sm" disabled={mailBusy}>{mailBusy ? "Sending" : "Send report"}</button>
+              </form>
+            )}
             {share && (
               <div className="reveal" style={{ padding: 14, margin: "12px 0 0" }}>
                 <div className="muted small">Public badge: anyone with the link sees only the score. Paste into a README:</div>

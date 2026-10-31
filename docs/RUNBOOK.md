@@ -43,3 +43,14 @@ Migrations live in `backend/app/migrations/versions/`. API and worker run `alemb
 | Current revision | `kubectl -n secureship exec -i postgres-0 -- sh -c 'psql -U $POSTGRES_USER -d $POSTGRES_DB -c "select * from alembic_version"'` |
 | Apply by hand | `python -c "from app import db; db.init_db()"` |
 | Rollback | restore the pre-deploy backup (see above); migrations are forward-only |
+
+## E-mail the PDF report (optional)
+Off by default (the button is hidden until a server is configured). Any SMTP server works (provider, Gmail app password, your own relay).
+```bash
+kubectl -n secureship create secret generic smtp-secret \
+  --from-literal=SMTP_HOST=smtp.example.com --from-literal=SMTP_PORT=587 \
+  --from-literal=SMTP_USER=apikey --from-literal=SMTP_PASSWORD='***' \
+  --from-literal=SMTP_FROM='SecureShip <reports@example.com>'
+kubectl -n secureship rollout restart deploy/backend
+```
+Limits per hour: 5 per scan owner, 10 per IP, 3 per recipient address (`RATE_EMAILS_PER_HOUR`). Only the owner's own finished scan can be sent.
