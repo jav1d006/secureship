@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { scoreColor, scoreLabel, api } from "./lib";
+import FlyingWord from "./components/FlyingWord";
 
 const SEV = ["critical", "high", "medium", "low"];
 const SEV_COLOR = { critical: "var(--crit)", high: "var(--high)", medium: "var(--med)", low: "var(--low)" };
@@ -202,6 +203,7 @@ export default function Home() {
     <>
       <main className="wrap" id="main">
         <section className="hero">
+          <FlyingWord />
           <div className="glass">
             <h1>Check your code before it ships.</h1>
             <p className="lead">Upload a project, pick the scanners and get a 0–100 security score with every finding explained.</p>
