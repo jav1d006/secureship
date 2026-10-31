@@ -1,0 +1,14 @@
+# Lists every manifest in this folder (Argo CD renders it with kustomize; deploy/cloud reuses it as a base).
+# A test fails when a manifest is added to the folder but not listed here.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - backup.yaml
+  - data.yaml
+  - frontend.yaml
+  - monitoring-config.yaml
+  - monitoring.yaml
+  - netpol-egress.yaml
+  - sandbox.yaml
+  - secureship.yaml
+  - worker.yaml

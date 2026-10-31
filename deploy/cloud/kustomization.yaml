@@ -1,0 +1,53 @@
+# Same app, for a normal cloud cluster: real domain + automatic TLS, default storage class, no node pinning.
+#   1. Install ingress-nginx and cert-manager in the cluster.
+#   2. sed -i 's/secureship.example.com/your.domain/g' deploy/cloud/kustomization.yaml ; edit cert-issuer.yaml e-mail.
+#   3. Point the Argo CD application at path deploy/cloud (or: kustomize build deploy/cloud | kubectl apply -f -).
+# Check locally: kustomize build deploy/cloud
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../k8s
+  - cert-issuer.yaml
+patches:
+  - target: {kind: Deployment, name: backend}
+    patch: |-
+      - {op: remove, path: /spec/template/spec/nodeSelector}
+  - target: {kind: Deployment, name: worker}
+    patch: |-
+      - {op: remove, path: /spec/template/spec/nodeSelector}
+  - target: {kind: Deployment, name: redis}
+    patch: |-
+      - {op: remove, path: /spec/template/spec/nodeSelector}
+  - target: {kind: StatefulSet, name: postgres}
+    patch: |-
+      - {op: remove, path: /spec/template/spec/nodeSelector}
+  - target: {kind: CronJob, name: postgres-backup}
+    patch: |-
+      - {op: remove, path: /spec/jobTemplate/spec/template/spec/nodeSelector}
+  - target: {kind: PersistentVolumeClaim, name: pg-backups}
+    patch: |-
+      - {op: remove, path: /spec/storageClassName}
+  - target: {kind: PersistentVolumeClaim, name: prometheus-data}
+    patch: |-
+      - {op: remove, path: /spec/storageClassName}
+  - target: {kind: PersistentVolumeClaim, name: scan-work}
+    patch: |-
+      - {op: remove, path: /spec/storageClassName}
+  - target: {kind: StatefulSet, name: postgres}
+    patch: |-
+      - {op: remove, path: /spec/volumeClaimTemplates/0/spec/storageClassName}
+  - target: {kind: Deployment, name: worker}
+    patch: |-
+      - {op: add, path: /spec/template/spec/containers/0/env/-, value: {name: SANDBOX_NODE, value: ""}}
+  - target: {kind: Ingress, name: secureship}
+    patch: |-
+      - {op: replace, path: /spec/rules/0/host, value: secureship.example.com}
+      - {op: add, path: /spec/tls, value: [{hosts: [secureship.example.com], secretName: secureship-tls-secureship}]}
+      - {op: add, path: /metadata/annotations/cert-manager.io~1cluster-issuer, value: letsencrypt}
+      - {op: add, path: /metadata/annotations/nginx.ingress.kubernetes.io~1force-ssl-redirect, value: "true"}
+  - target: {kind: Ingress, name: frontend}
+    patch: |-
+      - {op: replace, path: /spec/rules/0/host, value: secureship.example.com}
+      - {op: add, path: /spec/tls, value: [{hosts: [secureship.example.com], secretName: secureship-tls-frontend}]}
+      - {op: add, path: /metadata/annotations/cert-manager.io~1cluster-issuer, value: letsencrypt}
+      - {op: add, path: /metadata/annotations/nginx.ingress.kubernetes.io~1force-ssl-redirect, value: "true"}
