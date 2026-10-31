@@ -38,7 +38,7 @@ It is also a complete **DevSecOps reference project**: the application itself is
 | `code` | SAST | [Bandit](https://github.com/PyCQA/bandit) | Insecure patterns in Python source |
 | `iac` | IaC | Trivy | Misconfigurations in Terraform, Kubernetes, Helm, CloudFormation |
 | `docker` | Container | Trivy | Insecure Dockerfile instructions (root user, `latest` tags, `ADD` ...) |
-| `semgrep` | SAST (multi-language) | [Semgrep](https://semgrep.dev) | Insecure patterns in JS/TS, Python, Go, Java, Ruby, PHP ... (OWASP rules baked into the image, runs offline) |
+| `semgrep` | SAST (multi-language) | [Semgrep](https://semgrep.dev) | Insecure patterns in JS/TS, Python, Go, Java, Ruby, PHP ... (Semgrep default rules baked into the image, runs offline) |
 | `checkov` | IaC policies | [Checkov](https://www.checkov.io) | Terraform, Kubernetes, CloudFormation, GitHub Actions, GitLab CI, Ansible, OpenAPI ... |
 | `shell` | Shell SAST | [ShellCheck](https://www.shellcheck.net) | Bugs and unsafe constructs in `.sh` / `.bash` scripts |
 
@@ -49,6 +49,8 @@ Scanners are pluggable: each one is a function `run(path) -> {"findings": [...]}
 </div>
 
 ## Architecture
+
+Full API, data model, config and operations reference: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ```mermaid
 flowchart LR
@@ -136,6 +138,8 @@ SecureShip is a security tool, so it is held to the standard it checks for.
 - Scans are retried at most `MAX_ATTEMPTS` (3); a scan stuck in `running` longer than `STUCK_AFTER_SEC` is revived, then failed. A poison archive cannot loop forever.
 - A maintenance loop in the API (`MAINTENANCE_INTERVAL_SEC`) re-queues scans Redis forgot and deletes finished scans older than `RETENTION_DAYS` (30).
 - PostgreSQL access goes through a connection pool; the worker is a plain RQ worker (`python -m app.run_worker`).
+- **Speed:** scanners with nothing to analyse (no Dockerfile, no Python, no IaC ...) are skipped and do not count towards the score (shown as `skipped` in the result); the rest run in parallel, except that Trivy runs are serialised (shared cache) and Semgrep/Checkov are limited by `HEAVY_CONCURRENCY` (default 1, they need 300-500 MB each). `trivy config` runs once for `iac` + `docker`. Per-scanner seconds are stored in `result.timings` and exported as `secureship_scanner_duration_seconds_avg`.
+- The worker keeps the Trivy DB copy on its own 3 Gi `emptyDir` (`trivy-cache`); sharing `/tmp` made pods exceed the 1 Gi limit and get evicted.
 
 ## GitHub Action and badge
 
@@ -264,14 +268,16 @@ backend/
     scoring.py         score model
     run_worker.py      RQ worker entrypoint
     scanners/          gitleaks, trivy, trivy_config, bandit, semgrep, checkov, shellcheck, registry (__init__.py)
-  tests/               unit tests (pytest)
+  tests/               unit, API, PostgreSQL integration, scanner-parser and monitoring-sync tests (pytest)
   Dockerfile
 frontend/              Next.js app (scanner cards, drag & drop, results UI), public/ (robots.txt, security.txt)
 monitoring/            Prometheus config, alert rules (+ tests), Grafana dashboard; build_k8s.py generates the K8s ConfigMaps
 nginx/                 hardened edge config for docker compose (limits, headers, hidden-file blocking)
-docs/                  threat model, screenshots
+docs/                  ARCHITECTURE.md (full API and system reference), THREAT_MODEL.md, screenshots
+action.yml, scripts/    GitHub Action and CI scan script
+SECURITY.md            vulnerability disclosure policy
 k8s/                   Deployments, Services, Ingresses, NetworkPolicies, data layer
-.github/workflows/     CI (tests, Gitleaks, Trivy gate, GHCR push)
+.github/workflows/     CI (tests, Gitleaks, self-scan, promtool, Trivy gate, SBOM, GHCR push, cosign)
 ```
 
 ## Run it yourself
@@ -363,9 +369,9 @@ TEST_DATABASE_URL=postgresql://user:pw@localhost:5432/db pytest -q   # + Postgre
 - [ ] Alertmanager / notification channel (Slack, email) for the existing alerts
 - [ ] HTTPS with cert-manager
 - [ ] Scan a GitHub repository by URL / GitHub App for pull requests
-- [ ] PDF report export
-- [ ] User accounts
-- [ ] Accounts, plans/quotas and billing (SaaS tier)
+- [ ] PDF report; UI buttons for SARIF export and badge
+- [ ] User accounts, teams, plans/quotas and billing (SaaS tier)
+- [ ] Per-scan sandbox (gVisor/Kata/K8s Job) so scanners never share a pod
 - [ ] Pin base images and actions by digest/SHA
 - [ ] Sealed Secrets / SOPS for in-Git secrets
 
