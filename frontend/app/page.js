@@ -4,6 +4,24 @@ import { useEffect, useMemo, useRef, useState } from "react";
 const SEV = ["critical", "high", "medium", "low"];
 const SEV_COLOR = { critical: "#b91c1c", high: "#ef4444", medium: "#f59e0b", low: "#3b82f6" };
 const ICON = { secrets: "🔑", dependencies: "📦", code: "🧩", iac: "🏗️", docker: "🐳" };
+const SKIP = new Set(["node_modules", ".git", ".next", "dist", "build", "__pycache__", ".venv", "venv", ".terraform", ".idea", ".mypy_cache"]);
+const MAX_FILES = 1000, MAX_BYTES = 25 * 1024 * 1024;
+const skipped = (path) => path.split("/").slice(0, -1).some((d) => SKIP.has(d));
+
+async function walk(entry, base, out) {
+  if (entry.isFile) {
+    const f = await new Promise((ok, no) => entry.file(ok, no));
+    out.push({ f, path: base + entry.name });
+  } else if (entry.isDirectory && !SKIP.has(entry.name)) {
+    const rd = entry.createReader();
+    for (;;) {
+      const batch = await new Promise((ok, no) => rd.readEntries(ok, no));
+      if (!batch.length) break;
+      for (const e of batch) await walk(e, base + entry.name + "/", out);
+    }
+  }
+}
+
 const scoreColor = (s) => (s >= 80 ? "#22c55e" : s >= 60 ? "#84cc16" : s >= 40 ? "#f59e0b" : "#ef4444");
 const scoreLabel = (s) => (s >= 80 ? "Excellent" : s >= 60 ? "Good" : s >= 40 ? "Needs improvement" : "Poor");
 
@@ -29,7 +47,7 @@ function Ring({ value }) {
 export default function Home() {
   const [catalog, setCatalog] = useState([]);
   const [picked, setPicked] = useState([]);
-  const [file, setFile] = useState(null);
+  const [items, setItems] = useState([]);
   const [drag, setDrag] = useState(false);
   const [scan, setScan] = useState(null);
   const [err, setErr] = useState("");
@@ -38,6 +56,7 @@ export default function Home() {
   const [limit, setLimit] = useState(30);
   const timer = useRef(null);
   const input = useRef(null);
+  const dirInput = useRef(null);
 
   useEffect(() => {
     fetch("/api/v1/scanners")
@@ -66,13 +85,14 @@ export default function Home() {
     clearTimeout(timer.current);
     setErr(""); setScan(null); setBusy(true); setFilter("all"); setLimit(30);
     const body = new FormData();
-    body.append("file", file);
+    if (items.length === 1 && items[0].path.toLowerCase().endsWith(".zip")) body.append("file", items[0].f);
+    else items.forEach(({ f, path }) => body.append("files", f, path));
     body.append("scanners", picked.join(","));
     try {
       const r = await fetch("/api/v1/scans", { method: "POST", body });
       const d = await r.json();
       if (!r.ok) throw new Error(d.detail || "Upload failed");
-      setScan({ status: "queued", filename: file.name });
+      setScan({ status: "queued", filename: label });
       poll(d.id);
     } catch (e) {
       setErr(e.message);
@@ -80,11 +100,27 @@ export default function Home() {
     }
   }
 
-  function choose(f) {
-    if (!f) return;
-    if (!f.name.toLowerCase().endsWith(".zip")) return setErr("Please choose a .zip file");
-    setErr(""); setFile(f);
+  function choose(list) {
+    const ok = list.filter((x) => !skipped(x.path));
+    if (!ok.length) return setErr("No files to scan");
+    if (ok.length > MAX_FILES) return setErr(`Too many files (${ok.length}); the limit is ${MAX_FILES}. Upload a .zip instead.`);
+    if (ok.reduce((n, x) => n + x.f.size, 0) > MAX_BYTES) return setErr("Upload is larger than 25 MB");
+    setErr(""); setItems(ok);
   }
+  const fromInput = (e) => {
+    choose([...e.target.files].map((f) => ({ f, path: f.webkitRelativePath || f.name })));
+    e.target.value = "";
+  };
+  async function onDrop(e) {
+    e.preventDefault(); setDrag(false);
+    const entries = [...e.dataTransfer.items].map((i) => i.webkitGetAsEntry?.()).filter(Boolean);
+    if (!entries.length) return choose([...e.dataTransfer.files].map((f) => ({ f, path: f.name })));
+    const out = [];
+    try { for (const en of entries) await walk(en, "", out); } catch { return setErr("Could not read the dropped folder"); }
+    choose(out);
+  }
+  const bytes = items.reduce((n, x) => n + x.f.size, 0);
+  const label = items.length === 1 ? items[0].path : `${items[0]?.path.split("/")[0]} (${items.length} files)`;
 
   const result = scan?.result;
   const all = useMemo(() => {
@@ -96,7 +132,7 @@ export default function Home() {
   }, [result]);
   const counts = useMemo(() => Object.fromEntries(SEV.map((s) => [s, all.filter((f) => f.severity === s).length])), [all]);
   const shown = all.filter((f) => filter === "all" || f.severity === filter);
-  const ready = file && picked.length > 0 && !busy;
+  const ready = items.length > 0 && picked.length > 0 && !busy;
 
   return (
     <>
@@ -110,7 +146,7 @@ export default function Home() {
 
       <main>
         <h1>Ship <span className="grad">secure code</span>, faster.</h1>
-        <p className="lead">Pick your scanners, upload a project as a .zip and get a security score in seconds. Your code is scanned statically and never executed.</p>
+        <p className="lead">Pick your scanners, upload a folder, files or a .zip and get a security score in seconds. Your code is scanned statically and never executed.</p>
 
         <h2>1 · Choose scanners</h2>
         <div className="grid">
@@ -134,11 +170,16 @@ export default function Home() {
           onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && input.current?.click()}
           onDragOver={(e) => { e.preventDefault(); setDrag(true); }}
           onDragLeave={() => setDrag(false)}
-          onDrop={(e) => { e.preventDefault(); setDrag(false); choose(e.dataTransfer.files[0]); }}>
-          <input ref={input} type="file" accept=".zip" hidden onChange={(e) => choose(e.target.files[0])} />
+          onDrop={onDrop}>
+          <input ref={input} type="file" multiple hidden onChange={fromInput} />
+          <input ref={dirInput} type="file" webkitdirectory="" directory="" hidden onChange={fromInput} />
           <div className="big">📁</div>
-          <b>{file ? file.name : "Drop your .zip here or click to browse"}</b>
-          <div className="muted">{file ? `${(file.size / 1024 / 1024).toFixed(2)} MB` : "Max 25 MB"}</div>
+          <b>{items.length ? label : "Drop a folder, files or a .zip here"}</b>
+          <div className="muted">{items.length ? `${(bytes / 1024 / 1024).toFixed(2)} MB` : "Max 25 MB · node_modules, .git and build folders are skipped"}</div>
+          <div className="row" style={{ gap: 8, justifyContent: "center", marginTop: 10 }} onClick={(e) => e.stopPropagation()}>
+            <button type="button" className="chip" onClick={() => input.current?.click()}>Choose files / .zip</button>
+            <button type="button" className="chip" onClick={() => dirInput.current?.click()}>Choose folder</button>
+          </div>
         </div>
         <button className="btn" disabled={!ready} onClick={start}>
           {busy ? <><span className="spin" />Scanning…</> : "Run scan →"}

@@ -65,6 +65,7 @@ def test_checkov_handles_dict_and_list_shapes(monkeypatch, tmp_path):
 
 def test_checkov_empty_output_and_failure(monkeypatch, tmp_path):
     import pytest
+
     from app.scanners import checkov
     assert checkov.run(tmp_path)["findings"] == []          # no config files -> nothing to run
     (tmp_path / "a.yaml").write_text("kind: Pod")
@@ -90,6 +91,7 @@ def test_semgrep_maps_severity(monkeypatch, tmp_path):
 
 def test_semgrep_requires_rules(tmp_path):
     import pytest
+
     from app.scanners import semgrep
     semgrep.config.SEMGREP_RULES = tmp_path / "missing"
     with pytest.raises(gitleaks.ScannerError):

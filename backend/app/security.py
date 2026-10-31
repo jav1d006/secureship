@@ -10,7 +10,7 @@ import secrets
 from fastapi import Depends, HTTPException, Request, Response
 from redis import Redis
 
-from . import config
+from . import config, db
 
 TOKEN_RE = re.compile(r"^ss_[A-Za-z0-9_-]{43}$")
 COOKIE = "ss_owner"
@@ -54,7 +54,14 @@ def owner(request: Request, response: Response) -> str:
     if key is not None:
         if not TOKEN_RE.match(key):
             raise HTTPException(401, "invalid API key")
-        token = key
+        h = hashlib.sha256(key.encode()).hexdigest()
+        try:
+            info = db.resolve_key(h)
+        except Exception:
+            raise HTTPException(503, "service temporarily unavailable")
+        if info and info["revoked"]:
+            raise HTTPException(401, "API key revoked")
+        return info["owner"] if info else h
     else:
         token = request.cookies.get(COOKIE, "")
         if not TOKEN_RE.match(token):
@@ -62,6 +69,13 @@ def owner(request: Request, response: Response) -> str:
             response.set_cookie(COOKIE, token, max_age=31536000, httponly=True,
                                 samesite="lax", secure=config.COOKIE_SECURE, path="/")
     return hashlib.sha256(token.encode()).hexdigest()
+
+
+def session_owner(request: Request, response: Response) -> str:
+    """Owner for key management: browser session only (a leaked key must not mint more keys)."""
+    if request.headers.get("x-api-key") is not None:
+        raise HTTPException(403, "manage API keys from the web session, not with a key")
+    return owner(request, response)
 
 
 def limit_reads(who: str = Depends(owner)) -> str:
