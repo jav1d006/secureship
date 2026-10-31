@@ -1,7 +1,6 @@
 "use client";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { scoreColor, scoreLabel, api } from "./lib";
-import Cargo from "./components/Cargo";
 
 const SEV = ["critical", "high", "medium", "low"];
 const SEV_COLOR = { critical: "var(--crit)", high: "var(--high)", medium: "var(--med)", low: "var(--low)" };
@@ -186,6 +185,14 @@ export default function Home() {
       .sort((a, b) => SEV.indexOf(a.severity) - SEV.indexOf(b.severity));
   }, [result]);
   const counts = useMemo(() => Object.fromEntries(SEV.map((s) => [s, all.filter((f) => f.severity === s).length])), [all]);
+  const sceneState = scan?.status === "done" ? "done" : busy ? "scanning" : "idle";
+  const sceneKey = `${sceneState}:${SEV.map((k) => counts[k] || 0).join(",")}`;
+  useEffect(() => {
+    const detail = { state: sceneState, counts };
+    window.__ssScan = detail;
+    window.dispatchEvent(new CustomEvent("secureship:scan", { detail }));
+    return () => { window.__ssScan = undefined; window.dispatchEvent(new CustomEvent("secureship:scan", { detail: { state: "idle", counts: {} } })); };
+  }, [sceneKey]); // eslint-disable-line react-hooks/exhaustive-deps
   const needle = q.trim().toLowerCase();
   const shown = all.filter((f) => (filter === "all" || f.severity === filter) &&
     (!needle || `${f.rule} ${f.file} ${f.description} ${f.module}`.toLowerCase().includes(needle)));
@@ -195,11 +202,10 @@ export default function Home() {
     <>
       <main className="wrap" id="main">
         <section className="hero">
-          <div>
+          <div className="glass">
             <h1>Check your code before it ships.</h1>
             <p className="lead">Upload a project, pick the scanners and get a 0–100 security score with every finding explained.</p>
           </div>
-          <Cargo state={scan?.status === "done" ? "done" : busy ? "scanning" : "idle"} counts={counts} />
         </section>
 
         <h2><span className="n">1</span>Choose scanners</h2>
