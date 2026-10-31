@@ -35,6 +35,20 @@ export default function History() {
         <Link href="/" className="btn">New scan</Link>
       </div>
       {err && <p className="err" role="alert">{err}</p>}
+      {rows && rows.some((r) => r.status === "done") && (() => {
+        const done = rows.filter((r) => r.status === "done").slice().reverse();
+        const avg = Math.round(done.reduce((n, r) => n + r.score, 0) / done.length);
+        const last = done[done.length - 1].score, prev = done.length > 1 ? done[done.length - 2].score : null;
+        const pts = done.map((r, i) => `${done.length === 1 ? 60 : (i / (done.length - 1)) * 120},${34 - (r.score / 100) * 30}`).join(" ");
+        return (
+          <div className="stats">
+            <div className="card stat"><b>{rows.length}</b><span>scans shown</span></div>
+            <div className="card stat"><b style={{ color: scoreColor(avg) }}>{avg}</b><span>average score</span></div>
+            <div className="card stat"><b style={{ color: scoreColor(last) }}>{last}{prev !== null && <small style={{ fontSize: 14, marginLeft: 8, color: last >= prev ? "var(--ok)" : "var(--crit)" }}>{last >= prev ? "▲" : "▼"} {Math.abs(last - prev)}</small>}</b><span>latest score</span></div>
+            <div className="card stat"><svg viewBox="0 0 120 36" width="100%" height="36" role="img" aria-label="Score trend"><circle cx={done.length === 1 ? 60 : 120} cy={34 - (last / 100) * 30} r="3" fill="var(--seal)" /><polyline points={pts} fill="none" stroke="var(--seal)" strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" /></svg><span>score trend</span></div>
+          </div>
+        );
+      })()}
 
       <div className="card" style={{ overflow: "hidden" }}>
         {rows === null && !err && <div className="empty"><span className="spin" /></div>}
