@@ -28,7 +28,7 @@ export default function History() {
   return (
     <main className="wrap" id="main">
       <div className="pagehead">
-        <div>
+        <div className="glass">
           <h1>History</h1>
           <p className="lead" style={{ marginTop: 10 }}>Your scans from this browser and your API keys. Results are deleted after 30 days.</p>
         </div>
