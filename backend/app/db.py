@@ -28,31 +28,15 @@ def _now() -> str:
 
 
 def init_db() -> None:
-    with _conn() as c:
-        c.execute(
-            """CREATE TABLE IF NOT EXISTS scans (
-                id TEXT PRIMARY KEY,
-                filename TEXT NOT NULL,
-                status TEXT NOT NULL,
-                score INTEGER,
-                result JSONB,
-                error TEXT,
-                upload BYTEA,
-                created_at TEXT NOT NULL,
-                finished_at TEXT)"""
-        )
-        c.execute("ALTER TABLE scans ADD COLUMN IF NOT EXISTS scanners TEXT")
-        c.execute("ALTER TABLE scans ADD COLUMN IF NOT EXISTS owner TEXT")
-        c.execute("ALTER TABLE scans ADD COLUMN IF NOT EXISTS started_at TEXT")
-        c.execute("ALTER TABLE scans ADD COLUMN IF NOT EXISTS attempts INTEGER NOT NULL DEFAULT 0")
-        c.execute("ALTER TABLE scans ADD COLUMN IF NOT EXISTS share_token TEXT")
-        c.execute("CREATE UNIQUE INDEX IF NOT EXISTS scans_share ON scans (share_token) WHERE share_token IS NOT NULL")
-        c.execute("""CREATE TABLE IF NOT EXISTS api_keys (
-                id TEXT PRIMARY KEY, key_hash TEXT NOT NULL UNIQUE, creator TEXT NOT NULL,
-                name TEXT NOT NULL, prefix TEXT NOT NULL, created_at TEXT NOT NULL,
-                last_used_at TEXT, revoked_at TEXT)""")
-        c.execute("CREATE INDEX IF NOT EXISTS api_keys_creator ON api_keys (creator)")
-        c.execute("CREATE INDEX IF NOT EXISTS scans_owner_created ON scans (owner, created_at DESC)")
+    """Bring the schema to the latest Alembic revision (safe to call from several processes)."""
+    from pathlib import Path
+
+    from alembic import command
+    from alembic.config import Config
+    cfg = Config()
+    cfg.set_main_option("script_location", str(Path(__file__).parent / "migrations"))
+    cfg.attributes["url"] = config.DATABASE_URL
+    command.upgrade(cfg, "head")
 
 
 def create_scan(filename: str, upload: bytes, scanners: list[str], owner: str) -> str:

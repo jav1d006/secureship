@@ -113,3 +113,16 @@ def test_api_key_lifecycle(db):
     assert db.revoke_key(kid, "alice")
     assert db.resolve_key("h1")["revoked"] is True
     assert db.create_key("alice", "h3", "y", "ss_y", 2)           # revoked key frees a slot
+
+
+def test_migrations_idempotent_and_concurrent(db):
+    """Several processes (API + worker) start at once: the advisory lock serialises them."""
+    import subprocess
+    import sys
+    env = {**os.environ, "DATABASE_URL": URL}
+    ps = [subprocess.Popen([sys.executable, "-c", "from app import db; db.init_db()"], env=env,
+                           stderr=subprocess.PIPE, text=True) for _ in range(4)]
+    assert [p.wait(timeout=60) for p in ps] == [0, 0, 0, 0], [p.stderr.read() for p in ps]
+    with db._conn() as c:
+        assert c.execute("SELECT version_num FROM alembic_version").fetchone()["version_num"] == "0002"
+        assert c.execute("SELECT to_regclass('api_keys') IS NOT NULL AS ok").fetchone()["ok"]

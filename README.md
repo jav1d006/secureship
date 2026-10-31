@@ -265,6 +265,8 @@ backend/
     db.py              PostgreSQL access
     security.py        owner identity, API keys, rate limiting
     upload.py          folder/file uploads → sanitised ZIP
+    sandbox.py         scanner subprocess isolation (env, rlimits, kill)
+    migrations/        Alembic schema migrations (run at startup)
     logs.py            JSON logs + X-Request-ID
     config.py          environment settings
     safezip.py         hardened ZIP extraction

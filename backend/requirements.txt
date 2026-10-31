@@ -7,3 +7,5 @@ psycopg-pool==3.3.3
 rq==3.0.0
 redis==8.1.0
 prometheus-client==0.21.1
+alembic==1.14.0
+SQLAlchemy==2.0.36
