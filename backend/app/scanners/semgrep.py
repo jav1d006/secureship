@@ -1,9 +1,8 @@
 import json
-import os
 import subprocess
 from pathlib import Path
 
-from .. import config
+from .. import config, sandbox
 from .gitleaks import ScannerError
 
 SEV = {"ERROR": "high", "WARNING": "medium", "INFO": "low"}
@@ -14,12 +13,12 @@ def run(path: Path) -> dict:
     """Multi-language SAST with Semgrep, using rules baked into the image (offline, no metrics)."""
     if not config.SEMGREP_RULES.exists():
         raise ScannerError("semgrep rules not found in image")
-    env = {**os.environ, "HOME": "/tmp", "SEMGREP_SEND_METRICS": "off"}
+    env = {"SEMGREP_SEND_METRICS": "off"}
     cmd = [config.SEMGREP_BIN, "scan", "--config", str(config.SEMGREP_RULES), "--json", "--quiet",
            "--metrics", "off", "--disable-version-check", "--timeout", "10", "--jobs", "2", "--max-memory", "400",
            "--max-target-bytes", "1000000", "--exclude", "node_modules", str(path)]
     try:
-        proc = subprocess.run(cmd, capture_output=True, text=True, env=env, timeout=config.SCAN_TIMEOUT_SEC)
+        proc = sandbox.run(cmd, config.SCAN_TIMEOUT_SEC, env)
     except FileNotFoundError as e:
         raise ScannerError("semgrep binary not found") from e
     except subprocess.TimeoutExpired as e:

@@ -3,7 +3,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-from .. import config
+from .. import config, sandbox
 
 
 class ScannerError(Exception):
@@ -23,9 +23,7 @@ def run(path: Path) -> dict:
             "--exit-code", "0",
         ]
         try:
-            proc = subprocess.run(
-                cmd, capture_output=True, text=True, timeout=config.SCAN_TIMEOUT_SEC
-            )
+            proc = sandbox.run(cmd, config.SCAN_TIMEOUT_SEC)
         except FileNotFoundError as e:
             raise ScannerError("gitleaks binary not found") from e
         except subprocess.TimeoutExpired as e:
