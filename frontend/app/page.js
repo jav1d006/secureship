@@ -178,7 +178,7 @@ export default function Home() {
 
   return (
     <>
-      <main className="wrap">
+      <main className="wrap" id="main">
         <h1>Check your code before it ships.</h1>
         <p className="lead">Upload a project, pick the scanners and get a 0–100 security score with every finding explained.</p>
 
@@ -206,9 +206,8 @@ export default function Home() {
         </div>
 
         <h2><span className="n">2</span>Add your project</h2>
-        <div className={`card dz ${drag ? "drag" : ""}`} role="button" tabIndex={0}
+        <div className={`card dz ${drag ? "drag" : ""}`} aria-label="Drop zone"
           onClick={() => input.current?.click()}
-          onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && input.current?.click()}
           onDragOver={(e) => { e.preventDefault(); setDrag(true); }}
           onDragLeave={() => setDrag(false)}
           onDrop={onDrop}>

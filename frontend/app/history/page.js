@@ -26,7 +26,7 @@ export default function History() {
   }
 
   return (
-    <main className="wrap">
+    <main className="wrap" id="main">
       <div className="pagehead">
         <div>
           <h1>History</h1>
@@ -50,7 +50,7 @@ export default function History() {
         );
       })()}
 
-      <div className="card" style={{ overflow: "hidden" }}>
+      <div className="card" style={{ overflowX: "auto" }}>
         {rows === null && !err && <div className="empty"><span className="spin" /></div>}
         {rows && rows.length === 0 && (
           <div className="empty">

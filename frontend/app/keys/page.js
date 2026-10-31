@@ -40,7 +40,7 @@ export default function Keys() {
   const origin = typeof window === "undefined" ? "" : window.location.origin;
 
   return (
-    <main className="wrap">
+    <main className="wrap" id="main">
       <div className="pagehead">
         <div>
           <h1>API keys</h1>
@@ -72,7 +72,7 @@ export default function Keys() {
       {full && <p className="muted small" style={{ marginTop: -10 }}>You have reached the limit of {MAX_KEYS} keys. Revoke one to create another.</p>}
       {err && <p className="err" role="alert">{err}</p>}
 
-      <div className="card" style={{ overflow: "hidden" }}>
+      <div className="card" style={{ overflowX: "auto" }}>
         {keys === null && !err && <div className="empty"><span className="spin" /></div>}
         {keys && keys.length === 0 && (
           <div className="empty">
