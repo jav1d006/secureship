@@ -11,6 +11,7 @@ export default function RootLayout({ children }) {
   return (
     <html lang="en">
       <body>
+        <a className="skip" href="#main">Skip to content</a>
         <Header />
         {children}
         <footer>
