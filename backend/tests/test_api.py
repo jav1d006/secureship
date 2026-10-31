@@ -26,6 +26,7 @@ class FakeRedis:
 class FakeDB:
     def __init__(self):
         self.rows = {}
+        self.keys = {}
 
     def create_scan(self, name, data, scanners, owner):
         sid = f"{len(self.rows):032x}"
@@ -48,6 +49,26 @@ class FakeDB:
     def stats(self):
         return {"oldest_queued": 42.0, "done_1h": 5, "failed_1h": 1, "avg_duration": 7.5}
 
+    def resolve_key(self, h):
+        return self.keys.get(h)
+
+    def create_key(self, creator, h, name, prefix, max_active):
+        if sum(1 for k in self.keys.values() if k["creator"] == creator and not k["revoked"]) >= max_active:
+            return None
+        kid = f"k{len(self.keys)}"
+        self.keys[h] = {"owner": creator, "revoked": False, "creator": creator, "id": kid, "name": name, "prefix": prefix}
+        return kid
+
+    def list_keys(self, creator):
+        return [k for k in self.keys.values() if k["creator"] == creator and not k["revoked"]]
+
+    def revoke_key(self, kid, creator):
+        for k in self.keys.values():
+            if k["id"] == kid and k["creator"] == creator and not k["revoked"]:
+                k["revoked"] = True
+                return True
+        return False
+
     def delete_scan(self, sid, owner):
         return self.rows.pop(sid, None) is not None if self.get_scan_owned(sid, owner) else False
 
@@ -57,6 +78,7 @@ def client(monkeypatch):
     fake = FakeDB()
     monkeypatch.setattr(security, "_redis", FakeRedis())
     monkeypatch.setattr(main, "db", fake)
+    monkeypatch.setattr(security, "db", fake)
     monkeypatch.setattr(main.worker, "queue_len", lambda: 0)
     monkeypatch.setattr(main.worker, "enqueue", lambda sid: None)
     return TestClient(main.app)
@@ -139,3 +161,21 @@ def test_metrics_survives_dependency_failure(client, monkeypatch):
     assert r.status_code == 200
     assert 'secureship_dependency_up{dependency="redis"} 0.0' in r.text
     assert 'secureship_dependency_up{dependency="postgres"} 0.0' in r.text
+
+
+def test_request_id_header(client):
+    r = client.get("/api/v1/scanners", headers={"X-Request-ID": "abc12345-req"})
+    assert r.headers["X-Request-ID"] == "abc12345-req"
+    assert client.get("/api/v1/scanners", headers={"X-Request-ID": "bad id!"}).headers["X-Request-ID"] != "bad id!"
+
+
+def test_json_log_format():
+    import json
+    import logging
+
+    from app import logs
+    tok = logs.request_id.set("rid-12345")
+    rec = logging.LogRecord("x", logging.INFO, "f", 1, "hello %s", ("w",), None)
+    out = json.loads(logs.JsonFormatter().format(rec))
+    logs.request_id.reset(tok)
+    assert out["msg"] == "hello w" and out["request_id"] == "rid-12345" and out["level"] == "INFO"

@@ -1,8 +1,10 @@
 import asyncio
+import hashlib
 import logging
 import re
 import secrets
 import time
+import uuid
 from contextlib import asynccontextmanager
 
 from fastapi import APIRouter, Depends, FastAPI, File, Form, HTTPException, Query, Request, UploadFile
@@ -10,11 +12,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, PlainTextResponse, Response
 from prometheus_client import CONTENT_TYPE_LATEST, Counter, Gauge, Histogram, generate_latest
 
-from . import config, db, export, worker
+from . import config, db, export, logs, worker
 from .scanners import META, SCANNERS
-from .security import client_ip, hit, limit_reads, limit_scans, new_token
+from .security import client_ip, hit, limit_reads, limit_scans, new_token, session_owner
+from .upload import BadUpload, build_zip
 
-logging.basicConfig(level=logging.INFO)
+logs.setup()
 log = logging.getLogger("secureship.api")
 
 SCAN_ID_RE = re.compile(r"^[0-9a-f]{32}$")
@@ -65,8 +68,20 @@ async def harden(request: Request, call_next):
     cl = request.headers.get("content-length")
     if cl and cl.isdigit() and int(cl) > MAX_BODY:
         return JSONResponse({"detail": "request too large"}, status_code=413)
-    started = time.perf_counter()
-    resp = await call_next(request)
+    rid = request.headers.get("x-request-id", "")
+    rid = rid if re.fullmatch(r"[\w-]{8,64}", rid) else uuid.uuid4().hex
+    token = logs.request_id.set(rid)
+    started, status = time.perf_counter(), 500
+    try:
+        resp = await call_next(request)
+        status = resp.status_code
+    finally:
+        took = time.perf_counter() - started
+        if request.url.path not in ("/health", "/ready", "/metrics"):
+            log.info("%s %s -> %s in %.0fms", request.method, request.url.path,
+                     status, took * 1000)
+        logs.request_id.reset(token)
+    resp.headers["X-Request-ID"] = rid
     route = getattr(request.scope.get("route"), "path", "unmatched")
     if route != "/metrics":
         HTTP_REQS.labels(request.method, route, str(resp.status_code)).inc()
@@ -134,27 +149,59 @@ def scanners_catalog(_: str = Depends(limit_reads)):
 
 
 @v1.post("/keys", status_code=201)
-def create_key(request: Request):
+def create_key(request: Request, body: dict | None = None, who: str = Depends(session_owner)):
     hit(f"rl:k:{client_ip(request)}", 5, 3600)
-    return {"api_key": new_token(),
+    name = re.sub(r"[^\w.\- ]", "_", str((body or {}).get("name") or "key"))[:40] or "key"
+    token = new_token()
+    kid = db.create_key(who, hashlib.sha256(token.encode()).hexdigest(), name, token[:8], config.MAX_API_KEYS)
+    if kid is None:
+        raise HTTPException(409, f"limit of {config.MAX_API_KEYS} active keys reached; revoke one first")
+    return {"id": kid, "name": name, "api_key": token,
             "usage": "Send it as the X-API-Key header. Store it safely; it is not shown again."}
 
 
+@v1.get("/keys")
+def list_keys(who: str = Depends(session_owner)):
+    return db.list_keys(who)
+
+
+@v1.delete("/keys/{key_id}", status_code=204)
+def revoke_key(key_id: str, who: str = Depends(session_owner)):
+    if not db.revoke_key(key_id, who):
+        raise HTTPException(404, "key not found")
+    return Response(status_code=204)
+
+
 @v1.post("/scans", status_code=202)
-async def create_scan(file: UploadFile = File(...), scanners: str = Form("secrets"),
-                      who: str = Depends(limit_scans)):
-    name = re.sub(r"[^\w.\- ]", "_", (file.filename or "upload.zip"))[:200]
-    if not name.lower().endswith(".zip"):
-        raise HTTPException(400, "only .zip uploads are supported")
+async def create_scan(file: UploadFile | None = File(None), files: list[UploadFile] | None = File(None),
+                      scanners: str = Form("secrets"), who: str = Depends(limit_scans)):
     selected = [s for s in dict.fromkeys(x.strip() for x in scanners.split(",")) if s]
     if not selected or any(s not in SCANNERS for s in selected):
         raise HTTPException(400, "unknown or no scanner selected")
     limit = config.MAX_UPLOAD_MB * 1024 * 1024
-    data = await file.read(limit + 1)
-    if len(data) > limit:
-        raise HTTPException(413, f"file exceeds {config.MAX_UPLOAD_MB} MB")
-    if not data.startswith(b"PK\x03\x04"):
-        raise HTTPException(400, "file is not a valid zip archive")
+    if file is not None:  # a ready-made .zip
+        name = re.sub(r"[^\w.\- ]", "_", (file.filename or "upload.zip"))[:200]
+        if not name.lower().endswith(".zip"):
+            raise HTTPException(400, "only .zip uploads are supported")
+        data = await file.read(limit + 1)
+        if len(data) > limit:
+            raise HTTPException(413, f"file exceeds {config.MAX_UPLOAD_MB} MB")
+        if not data.startswith(b"PK\x03\x04"):
+            raise HTTPException(400, "file is not a valid zip archive")
+    elif files:  # loose files / a folder: filenames carry relative paths
+        items, total = [], 0
+        for f in files:
+            content = await f.read(limit + 1)
+            total += len(content)
+            if total > limit:
+                raise HTTPException(413, f"upload exceeds {config.MAX_UPLOAD_MB} MB")
+            items.append((f.filename or "", content))
+        try:
+            data, name = build_zip(items, config.MAX_FILES, limit)
+        except BadUpload as e:
+            raise HTTPException(400, str(e))
+    else:
+        raise HTTPException(400, "no file uploaded")
     try:
         if worker.queue_len() >= config.MAX_QUEUE:
             raise HTTPException(503, "scan queue is full, try again shortly")

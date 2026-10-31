@@ -29,7 +29,7 @@ GitHub push ─> Actions (test · gitleaks · self-scan · image+SBOM+cosign) �
 
 | # | Step | Component |
 |---|---|---|
-| 1 | `POST /api/v1/scans` (zip + scanner list) validated: `.zip`, ≤ 25 MB, `PK\x03\x04` magic, known scanners, queue < `MAX_QUEUE`, rate limits | API |
+| 1 | `POST /api/v1/scans` (zip **or** loose files/folder + scanner list) validated: `.zip`, ≤ 25 MB, `PK\x03\x04` magic, known scanners, queue < `MAX_QUEUE`, rate limits | API |
 | 2 | Row inserted (`status=queued`, upload in BYTEA, `owner` = SHA-256 of token); job `enqueue(scan_id)` (`job_timeout=600`) → `202 {id,status}` | API → PG, Redis |
 | 3 | Worker loads upload, `set_running` (`attempts+1`, `started_at`), writes `WORK_DIR/<id>/upload.zip` | Worker |
 | 4 | `safe_extract` (zip-slip, symlinks skipped, ≤ `MAX_FILES`, ≤ `MAX_UNZIPPED_MB` enforced while streaming) → `harden_tree` (no symlinks, no exec bits, 0600/0700) | Worker |
@@ -50,7 +50,8 @@ Base: `/api/v1` (OpenAPI UI: `/api/docs`, spec: `/api/openapi.json`). JSON unles
 |---|---|
 | Web UI identity | HttpOnly cookie `ss_owner` (SameSite=Lax, 1 year, `Secure` if `COOKIE_SECURE=true`), created on first request |
 | API identity | Header `X-API-Key: ss_<43 chars>` (bad format → `401`). Only SHA-256 of the token is stored (`scans.owner`) |
-| Get a key | `POST /api/v1/keys` → `201 {"api_key": "ss_…"}` (shown once; **5/hour per IP**) |
+| Get a key | `POST /api/v1/keys` `{"name"}` → `201 {"id","api_key":"ss_…"}` (shown once; **5/hour per IP**, max 5 active, `409` beyond). Stored in `api_keys` (hash, prefix, last use); acts as the creating session, so scans appear in the UI |
+| Manage keys | `GET /api/v1/keys`, `DELETE /api/v1/keys/{id}` (revoke → `401`); browser session only, a key gets `403` |
 | Ownership | Every scan query filters by owner; foreign or malformed IDs → `404` (no existence leak) |
 | Reads | 240/min per owner |
 | Scan creation | 10/hour per owner **and** 30/hour per IP; Redis down → `503` (fail closed). Other limits fail open |
@@ -66,8 +67,10 @@ Base: `/api/v1` (OpenAPI UI: `/api/docs`, spec: `/api/openapi.json`). JSON unles
 | GET | `/ready` | – | PG + Redis reachable (K8s readiness probe) | `200 {"status":"ready"}` | `503` |
 | GET | `/metrics` | – (internal) | Prometheus text. **Not routed by ingress/nginx** | `200` | – |
 | GET | `/api/v1/scanners` | owner | Catalog: `key,label,type,tool,description` | `200 [..]` | `429` |
-| POST | `/api/v1/keys` | – | Issue API key | `201` | `429` |
-| POST | `/api/v1/scans` | owner | multipart: `file` (.zip), `scanners` (csv, default `secrets`) | `202 {id,status:"queued"}` | `400` (not .zip / bad magic / unknown or empty scanner list), `413`, `429`, `503` (queue full / Redis down) |
+| POST | `/api/v1/keys` | session | Issue API key | `201` | `409` `429` |
+| GET | `/api/v1/keys` | session | List active keys | `200` | – |
+| DELETE | `/api/v1/keys/{id}` | session | Revoke key | `204` | `404` |
+| POST | `/api/v1/scans` | owner | multipart: `file` (.zip) **or** repeated `files` (filename = relative path; server builds a sanitised ZIP, ≤ `MAX_FILES`, ≤ 25 MB total), `scanners` (csv, default `secrets`) | `202 {id,status:"queued"}` | `400` (not .zip / bad magic / unknown or empty scanner list), `413`, `429`, `503` (queue full / Redis down) |
 | GET | `/api/v1/scans` | owner | `limit` 1–100 (20), `offset` ≥ 0. Fields: `id,filename,status,score,scanners,created_at,finished_at` | `200 [..]` | `429` |
 | GET | `/api/v1/scans/{id}` | owner | Full scan incl. `result`, `error` | `200` | `404`, `429` |
 | DELETE | `/api/v1/scans/{id}` | owner | Delete scan | `204` | `404` |

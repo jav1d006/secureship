@@ -1,8 +1,8 @@
 """Entrypoint of the scan worker: python -m app.run_worker"""
+import logging
+
 from redis import Redis
 from rq import Queue, Worker
-
-import logging
 
 from . import config
 

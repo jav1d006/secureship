@@ -47,6 +47,11 @@ def init_db() -> None:
         c.execute("ALTER TABLE scans ADD COLUMN IF NOT EXISTS attempts INTEGER NOT NULL DEFAULT 0")
         c.execute("ALTER TABLE scans ADD COLUMN IF NOT EXISTS share_token TEXT")
         c.execute("CREATE UNIQUE INDEX IF NOT EXISTS scans_share ON scans (share_token) WHERE share_token IS NOT NULL")
+        c.execute("""CREATE TABLE IF NOT EXISTS api_keys (
+                id TEXT PRIMARY KEY, key_hash TEXT NOT NULL UNIQUE, creator TEXT NOT NULL,
+                name TEXT NOT NULL, prefix TEXT NOT NULL, created_at TEXT NOT NULL,
+                last_used_at TEXT, revoked_at TEXT)""")
+        c.execute("CREATE INDEX IF NOT EXISTS api_keys_creator ON api_keys (creator)")
         c.execute("CREATE INDEX IF NOT EXISTS scans_owner_created ON scans (owner, created_at DESC)")
 
 
@@ -220,3 +225,44 @@ def get_shared(token: str) -> dict | None:
     """Only what a public badge may show: no filename, no findings."""
     with _conn() as c:
         return c.execute("SELECT status, score FROM scans WHERE share_token=%s", (token,)).fetchone()
+
+
+# ---- API keys -------------------------------------------------------------
+# A key authenticates as the session that created it, so its scans show up in the web UI.
+# Keys never recorded here (issued before this table existed) keep working as stand-alone identities.
+
+def create_key(creator: str, key_hash: str, name: str, prefix: str, max_active: int) -> str | None:
+    """Returns the new key id, or None when `creator` already holds `max_active` active keys."""
+    kid = uuid.uuid4().hex[:12]
+    with _conn() as c:
+        n = c.execute("SELECT COUNT(*) AS n FROM api_keys WHERE creator=%s AND revoked_at IS NULL",
+                      (creator,)).fetchone()["n"]
+        if n >= max_active:
+            return None
+        c.execute("INSERT INTO api_keys (id, key_hash, creator, name, prefix, created_at) VALUES (%s,%s,%s,%s,%s,%s)",
+                  (kid, key_hash, creator, name, prefix, _now()))
+    return kid
+
+
+def resolve_key(key_hash: str) -> dict | None:
+    """{'owner': ..., 'revoked': bool} for a recorded key, None for an unknown (legacy) one."""
+    with _conn() as c:
+        r = c.execute("UPDATE api_keys SET last_used_at=%s WHERE key_hash=%s AND "
+                      "(last_used_at IS NULL OR last_used_at::timestamptz < now() - interval '1 minute') "
+                      "AND revoked_at IS NULL RETURNING creator", (_now(), key_hash)).fetchone()
+        if r:
+            return {"owner": r["creator"], "revoked": False}
+        r = c.execute("SELECT creator, revoked_at FROM api_keys WHERE key_hash=%s", (key_hash,)).fetchone()
+    return {"owner": r["creator"], "revoked": r["revoked_at"] is not None} if r else None
+
+
+def list_keys(creator: str) -> list[dict]:
+    with _conn() as c:
+        return c.execute("SELECT id, name, prefix, created_at, last_used_at FROM api_keys "
+                         "WHERE creator=%s AND revoked_at IS NULL ORDER BY created_at DESC", (creator,)).fetchall()
+
+
+def revoke_key(key_id: str, creator: str) -> bool:
+    with _conn() as c:
+        return c.execute("UPDATE api_keys SET revoked_at=%s WHERE id=%s AND creator=%s AND revoked_at IS NULL "
+                         "RETURNING id", (_now(), key_id, creator)).fetchone() is not None

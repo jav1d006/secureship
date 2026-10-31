@@ -1,0 +1,68 @@
+# Daily logical backup of PostgreSQL (see docs/RUNBOOK.md for restore and off-cluster copy).
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata: {name: pg-backups, namespace: secureship}
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: local-path
+  resources: {requests: {storage: 2Gi}}
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata: {name: postgres-backup, namespace: secureship}
+spec:
+  schedule: "0 3 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 2
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      activeDeadlineSeconds: 900
+      template:
+        metadata: {labels: {app: postgres-backup}}
+        spec:
+          restartPolicy: Never
+          automountServiceAccountToken: false
+          enableServiceLinks: false
+          nodeSelector: {kubernetes.io/hostname: node2}
+          securityContext: {runAsNonRoot: true, runAsUser: 70, runAsGroup: 70, fsGroup: 70, seccompProfile: {type: RuntimeDefault}}
+          containers:
+            - name: backup
+              image: postgres:16-alpine
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities: {drop: ["ALL"]}
+              envFrom: [{secretRef: {name: db-secret}}]
+              command: ["/bin/sh", "-ec"]
+              args:
+                - |
+                  f=/backup/secureship-$(date -u +%Y%m%d-%H%M%S).sql.gz
+                  PGPASSWORD="$POSTGRES_PASSWORD" pg_dump -h postgres -U "$POSTGRES_USER" -d "$POSTGRES_DB" --no-owner | gzip > "$f.tmp"
+                  gzip -t "$f.tmp"
+                  mv "$f.tmp" "$f"
+                  ls -1t /backup/secureship-*.sql.gz | tail -n +8 | xargs -r rm -f
+                  echo "backup ok: $f ($(wc -c < "$f") bytes)"
+              resources:
+                requests: {cpu: 20m, memory: 64Mi}
+                limits: {memory: 256Mi}
+              volumeMounts:
+                - {name: backup, mountPath: /backup}
+                - {name: tmp, mountPath: /tmp}
+          volumes:
+            - {name: backup, persistentVolumeClaim: {claimName: pg-backups}}
+            - {name: tmp, emptyDir: {sizeLimit: 64Mi}}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: allow-backup-egress, namespace: secureship}
+spec:
+  podSelector: {matchLabels: {app: postgres-backup}}
+  policyTypes: [Egress]
+  egress:
+    - ports:
+        - {port: 53, protocol: UDP}
+        - {port: 53, protocol: TCP}
+    - to: [{podSelector: {matchLabels: {app: postgres}}}]
+      ports: [{port: 5432, protocol: TCP}]
