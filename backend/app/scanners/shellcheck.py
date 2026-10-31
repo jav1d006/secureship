@@ -2,7 +2,7 @@ import json
 import subprocess
 from pathlib import Path
 
-from .. import config
+from .. import config, sandbox
 from .gitleaks import ScannerError
 
 LEVEL = {"error": "high", "warning": "medium", "info": "low", "style": "low"}
@@ -29,7 +29,7 @@ def run(path: Path) -> dict:
         return {"findings": []}
     cmd = [config.SHELLCHECK_BIN, "-f", "json", "--severity=info", *files]
     try:
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=config.SCAN_TIMEOUT_SEC)
+        proc = sandbox.run(cmd, config.SCAN_TIMEOUT_SEC)
     except FileNotFoundError as e:
         raise ScannerError("shellcheck binary not found") from e
     except subprocess.TimeoutExpired as e:
