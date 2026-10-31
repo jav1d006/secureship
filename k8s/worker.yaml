@@ -7,7 +7,8 @@ spec:
   template:
     metadata: {labels: {app: worker}}
     spec:
-      automountServiceAccountToken: false
+      serviceAccountName: worker
+      automountServiceAccountToken: true   # only used in SANDBOX_MODE=job (Role: create/get/delete Jobs)
       enableServiceLinks: false
       nodeSelector: {kubernetes.io/hostname: node1}
       securityContext: {runAsNonRoot: true, runAsUser: 10001, seccompProfile: {type: RuntimeDefault}}
@@ -22,6 +23,8 @@ spec:
             - {name: REDIS_URL, value: "redis://redis:6379/0"}
             - {name: WORK_DIR, value: /tmp/work}
             - {name: HOME, value: /tmp}
+            - {name: SANDBOX_MODE, value: local}   # set to "job" to run every scan in its own Job (docs/SANDBOX.md)
+            - {name: SANDBOX_IMAGE, value: "ghcr.io/jav1d006/secureship-backend:latest"}
             - name: REDIS_PASSWORD
               valueFrom: {secretKeyRef: {name: redis-secret, key: REDIS_PASSWORD, optional: true}}
           securityContext:
@@ -36,6 +39,8 @@ spec:
             # The Trivy vulnerability DB is copied here at start (the root fs is read-only). It is large,
             # so it gets its own volume and limit: sharing /tmp made pods exceed 1Gi and get evicted.
             - {name: trivy-cache, mountPath: /tmp/trivy-cache}
+            - {name: scan-work, mountPath: /scan-work}
       volumes:
         - {name: tmp, emptyDir: {sizeLimit: 1Gi}}
         - {name: trivy-cache, emptyDir: {sizeLimit: 3Gi}}
+        - {name: scan-work, persistentVolumeClaim: {claimName: scan-work}}

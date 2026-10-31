@@ -1,0 +1,48 @@
+# Job-per-scan sandbox (enable with SANDBOX_MODE=job on the worker; see docs/SANDBOX.md).
+# Scan Jobs carry the label app=scan-job and get NO NetworkPolicy allow rule: with the namespace's
+# default-deny they have no network at all (no DB, no Redis, no DNS, no internet).
+apiVersion: v1
+kind: ServiceAccount
+metadata: {name: worker, namespace: secureship}
+automountServiceAccountToken: false
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata: {name: scan-job-runner, namespace: secureship}
+rules:
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["create", "get", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata: {name: worker-scan-job-runner, namespace: secureship}
+subjects: [{kind: ServiceAccount, name: worker, namespace: secureship}]
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: scan-job-runner}
+---
+# Shared between the worker (writes the extracted source) and the scan Jobs. Both run on node1
+# (local-path volumes belong to one node).
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata: {name: scan-work, namespace: secureship}
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: local-path
+  resources: {requests: {storage: 4Gi}}
+---
+# The worker must reach the Kubernetes API to create Jobs. Narrow the ipBlocks to your API server
+# address (kubectl get endpoints kubernetes) if you want it tighter.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: allow-worker-to-kube-api, namespace: secureship}
+spec:
+  podSelector: {matchLabels: {app: worker}}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - ipBlock: {cidr: 10.0.0.0/8}
+        - ipBlock: {cidr: 172.16.0.0/12}
+        - ipBlock: {cidr: 192.168.0.0/16}
+      ports:
+        - {port: 443, protocol: TCP}
+        - {port: 6443, protocol: TCP}
