@@ -52,6 +52,15 @@ def test_load_output_size_cap_and_missing(tmp_path, monkeypatch):
         jobs.load_output(write(tmp_path, {"results": {}}))
 
 
+def test_job_placement_follows_worker_when_unpinned(monkeypatch):
+    pod = jobs.build_job(SID, ["code"])["spec"]["template"]["spec"]
+    assert pod["nodeSelector"] == {"kubernetes.io/hostname": config.SANDBOX_NODE} and "affinity" not in pod
+    monkeypatch.setattr(config, "SANDBOX_NODE", "")
+    pod = jobs.build_job(SID, ["code"])["spec"]["template"]["spec"]
+    assert "nodeSelector" not in pod
+    assert pod["affinity"]["podAffinity"]["requiredDuringSchedulingIgnoredDuringExecution"][0]["labelSelector"] == {"matchLabels": {"app": "worker"}}
+
+
 class FakeKube:
     def __init__(self, status, on_create=None):
         self.status, self.on_create, self.calls = status, on_create, []
