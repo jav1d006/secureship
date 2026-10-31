@@ -266,6 +266,7 @@ backend/
     security.py        owner identity, API keys, rate limiting
     upload.py          folder/file uploads → sanitised ZIP
     sandbox.py         scanner subprocess isolation (env, rlimits, kill)
+    jobs.py            Job-per-scan sandbox (SANDBOX_MODE=job), docs/SANDBOX.md
     migrations/        Alembic schema migrations (run at startup)
     logs.py            JSON logs + X-Request-ID
     config.py          environment settings
