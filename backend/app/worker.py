@@ -104,6 +104,13 @@ def requeue_unfinished() -> None:
         log.exception("requeue failed")
 
 
+def _chmod(path, mode) -> None:
+    try:
+        os.chmod(path, mode)
+    except PermissionError:      # not ours (leftover on the shared scan volume): the scan sandbox still isolates it
+        log.warning("could not chmod %s", path)
+
+
 def harden_tree(root) -> None:
     """Defence in depth: no symlinks, no exec/setuid bits, owner-only permissions."""
     for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
@@ -111,11 +118,11 @@ def harden_tree(root) -> None:
             p = os.path.join(dirpath, name)
             if os.path.islink(p):
                 os.unlink(p)
-        os.chmod(dirpath, 0o700)
+        _chmod(dirpath, 0o700)
         for name in filenames:
             p = os.path.join(dirpath, name)
             if os.path.isfile(p) and not os.path.islink(p):
-                os.chmod(p, 0o600)
+                _chmod(p, 0o600)
 
 
 def process(scan_id: str) -> None:
@@ -128,6 +135,7 @@ def process(scan_id: str) -> None:
             db.set_failed(scan_id, "upload missing")
             return
         db.set_running(scan_id)
+        shutil.rmtree(scan_dir, ignore_errors=True)    # a retry must not inherit a crashed attempt's files
         scan_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
         zip_path = scan_dir / "upload.zip"
         zip_path.write_bytes(data)

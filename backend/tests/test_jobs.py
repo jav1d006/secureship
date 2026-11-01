@@ -163,3 +163,27 @@ def test_sweep_removes_old_dirs(tmp_path, monkeypatch):
     (tmp_path / "old").mkdir(); (tmp_path / "new").mkdir()
     os.utime(tmp_path / "old", (1, 1))
     assert jobs.sweep(3600) == 1 and (tmp_path / "new").exists() and not (tmp_path / "old").exists()
+
+
+def test_run_in_job_survives_api_blips(tmp_path):
+    class Flaky(FakeKube):
+        def get_job(self, name):
+            self.calls.append("get")
+            if self.calls.count("get") < 3:
+                raise TimeoutError("read timed out")
+            return {"status": {"succeeded": 1}}
+
+    def produce():
+        (tmp_path / "out" / "result.json").write_text(json.dumps(
+            {"results": {"code": {"findings": []}}, "errors": {}, "skipped": {}, "timings": {"code": 1}}))
+    k = Flaky({}, produce)
+    res, *_ = jobs.run_in_job(SID, ["code"], tmp_path, client=k, poll=0)
+    assert "code" in res and k.calls.count("get") == 3
+
+
+def test_run_in_job_gives_up_when_api_stays_down(tmp_path):
+    class Down(FakeKube):
+        def get_job(self, name):
+            raise TimeoutError("down")
+    with pytest.raises(jobs.JobFailed, match="unreachable"):
+        jobs.run_in_job(SID, ["code"], tmp_path, client=Down({}), poll=0)
