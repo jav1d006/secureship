@@ -1,0 +1,17 @@
+name: Bug report
+description: Something does not work as expected
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes: {label: What happened, description: What you did, what you expected, what you got}
+    validations: {required: true}
+  - type: textarea
+    id: repro
+    attributes: {label: Steps to reproduce}
+  - type: input
+    id: env
+    attributes: {label: Environment, placeholder: "docker compose / Kubernetes, browser, version or commit"}
+  - type: textarea
+    id: logs
+    attributes: {label: Logs, description: Remove secrets and private code before pasting, render: shell}
