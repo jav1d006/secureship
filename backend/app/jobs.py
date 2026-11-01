@@ -127,8 +127,17 @@ def run_in_job(scan_id: str, names: list[str], scan_dir: Path, client: KubeClien
     try:
         client.create_job(build_job(scan_id, names))
         deadline = time.monotonic() + config.SANDBOX_JOB_TIMEOUT + 30
+        flaky = 0
         while True:
-            st = (client.get_job(name) or {}).get("status", {})
+            try:
+                st = (client.get_job(name) or {}).get("status", {})
+                flaky = 0
+            except (OSError, JobFailed) as e:      # API server briefly busy or restarting: keep polling
+                flaky += 1
+                if flaky >= 8 or time.monotonic() > deadline:
+                    raise JobFailed(f"kubernetes API unreachable: {e}") from e
+                time.sleep(poll * 2)
+                continue
             if st.get("succeeded"):
                 break
             if st.get("failed"):
