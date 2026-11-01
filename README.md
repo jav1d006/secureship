@@ -2,7 +2,7 @@
 
 # 🛡️ SecureShip
 
-**Open-source DevSecOps scanner. Pick your scanners, upload a project as a `.zip`, get a security score in seconds.**
+**Open-source DevSecOps scanner. Pick your scanners, drop a folder or `.zip`, get a 0–100 security score in seconds. No account needed.**
 
 [![CI](https://github.com/jav1d006/secureship/actions/workflows/ci.yml/badge.svg)](https://github.com/jav1d006/secureship/actions/workflows/ci.yml)
 ![License](https://img.shields.io/badge/license-MIT-blue)
@@ -25,7 +25,16 @@ SecureShip is a small, self-hosted security scanner built for teams that have no
 - a **severity-filtered list of findings** (file, line, rule, description, fixed version when known),
 - the result of each tool, even if another tool fails.
 
-The web UI has three pages: **Scan** (choose scanners, drop a folder/files/ZIP), **History** (reopen or delete earlier scans) and **API keys** (create, copy once, revoke).
+The web UI has three pages: **Scan** (choose scanners, drop a folder/files/ZIP), **History** (reopen or delete earlier scans) and **API keys** (create, copy once, revoke). It runs on a full-page 3D scene (three.js) that reacts to scan state; the light/dark/auto theme and reduced-motion are respected, and it falls back to plain CSS without WebGL.
+
+| Feature | Details |
+|---|---|
+| Reports | **PDF** download, optional **e-mail the PDF** (needs SMTP, see below), **SARIF / CSV / JSON** export |
+| Sharing | Public score **badge** (score only), revocable |
+| Access | **No accounts**: anonymous cookie or `X-API-Key` (open source, self-hosted) |
+| Isolation | Scanners run in a clean-env, rlimited sandbox, or one **Kubernetes Job per scan** (`SANDBOX_MODE=job`, [docs/SANDBOX.md](docs/SANDBOX.md)) |
+| Operations | Daily PostgreSQL backup, Prometheus + Grafana + **Alertmanager** (e-mail), Alembic migrations, JSON logs with request IDs |
+| Deploy | Lab (`k8s/`) or cloud with your domain and Let's Encrypt TLS (`deploy/cloud`, [docs/DEPLOY.md](docs/DEPLOY.md)) |
 
 > **Your code is only extracted and statically analysed. It is never executed or imported.** Secrets that are found are redacted, and the uploaded archive is deleted as soon as the scan finishes.
 
@@ -201,7 +210,7 @@ Locally: `docker compose --profile monitoring up` (Prometheus :9090, Grafana :30
 | `HighErrorRate` | > 5% of API responses are 5xx | warning |
 | `HighLatencyP95` | p95 latency > 2 s on a route | warning |
 
-Alerts are visible in Prometheus and Grafana; to get notified add an Alertmanager (or Grafana contact points) pointing at Slack/email. Edit the files in `monitoring/`, then run `python monitoring/build_k8s.py` to regenerate `k8s/monitoring-config.yaml` (a test fails if they drift).
+Alerts are visible in Prometheus and Grafana and are sent by **Alertmanager** e-mail. Create the `alertmanager-config` Secret from `monitoring/alertmanager.email.example.yml` (fill the `CHANGE_ME` values locally, never commit them); see [docs/RUNBOOK.md](docs/RUNBOOK.md). Edit the files in `monitoring/`, then run `python monitoring/build_k8s.py` to regenerate `k8s/monitoring-config.yaml` (a test fails if they drift).
 
 ## Security score
 
@@ -268,6 +277,7 @@ backend/
     security.py        owner identity, API keys, rate limiting
     upload.py          folder/file uploads → sanitised ZIP
     sandbox.py         scanner subprocess isolation (env, rlimits, kill)
+    report.py          PDF report;  mailer.py  e-mail the PDF (SMTP)
     jobs.py            Job-per-scan sandbox (SANDBOX_MODE=job), docs/SANDBOX.md
     migrations/        Alembic schema migrations (run at startup)
     logs.py            JSON logs + X-Request-ID
@@ -281,10 +291,11 @@ backend/
 frontend/              Next.js app (scanner cards, drag & drop, results UI), public/ (robots.txt, security.txt)
 monitoring/            Prometheus config, alert rules (+ tests), Grafana dashboard; build_k8s.py generates the K8s ConfigMaps
 nginx/                 hardened edge config for docker compose (limits, headers, hidden-file blocking)
-docs/                  ARCHITECTURE.md (full API and system reference), THREAT_MODEL.md, screenshots
+docs/                  ARCHITECTURE, DEPLOY, RUNBOOK, SANDBOX, THREAT_MODEL, screenshots
 action.yml, scripts/    GitHub Action and CI scan script
 SECURITY.md            vulnerability disclosure policy
-k8s/                   Deployments, Services, Ingresses, NetworkPolicies, data layer
+k8s/                   Deployments, Services, Ingresses, NetworkPolicies, data layer, backup CronJob, sandbox RBAC, monitoring
+deploy/cloud/          kustomize overlay: your domain + cert-manager TLS
 .github/workflows/     CI (tests, Gitleaks, self-scan, promtool, Trivy gate, SBOM, GHCR push, cosign)
 ```
 
@@ -342,6 +353,9 @@ curl localhost:8080/health
 
 `http://localhost:8080` serves the UI and the API through the same nginx rules used in production (`nginx/`).
 
+### E-mail PDF (optional)
+Create the `smtp-secret` (`SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM`) and restart the backend. Without `SMTP_HOST` the e-mail form is hidden. Limit: `RATE_EMAILS_PER_HOUR` (default 5).
+
 ### Run the tests
 
 ```bash
@@ -366,22 +380,25 @@ TEST_DATABASE_URL=postgresql://user:pw@localhost:5432/db pytest -q   # + Postgre
 - Bandit analyses Python only.
 - The Trivy vulnerability database is baked into the image at build time, so rebuild the image regularly to stay current.
 - The reference cluster is a two-node lab with limited RAM; a single replica of each component is used.
-- Identity is an anonymous token (cookie / API key), not a user account; losing it loses access to your scans.
+- Identity is an anonymous token (cookie / API key) by design, not a user account; losing it loses access to your scans.
+- Backups stay on the cluster (`pg-backups` PVC); copy them off-cluster yourself.
 - Results are deleted automatically after `RETENTION_DAYS`; the SBOM/signature steps need the GitHub-hosted CI.
 - Semgrep rules are fetched when the image is built; rebuild regularly (Dependabot + CI) to refresh them.
-- No TLS in the lab cluster yet (cert-manager is on the roadmap), so HSTS and `Secure` cookies are inactive.
+- The lab cluster has no TLS (HSTS and `Secure` cookies inactive). `deploy/cloud` adds cert-manager and Let's Encrypt once you point a domain at the ingress.
 
 ## Roadmap
 
+- [x] Alertmanager e-mail notifications
+- [x] PDF report with optional e-mail delivery; UI buttons for SARIF/CSV/JSON export and badge
+- [x] Per-scan Kubernetes Job sandbox
+- [x] Cloud overlay with cert-manager TLS (needs your domain)
 - [ ] Commit-SHA image tags written back to Git by CI (fully hands-off GitOps)
-- [ ] Alertmanager / notification channel (Slack, email) for the existing alerts
-- [ ] HTTPS with cert-manager
+- [ ] Off-cluster backup copy
 - [ ] Scan a GitHub repository by URL / GitHub App for pull requests
-- [ ] PDF report; UI buttons for SARIF export and badge
-- [ ] User accounts, teams, plans/quotas and billing (SaaS tier)
-- [ ] Per-scan sandbox (gVisor/Kata/K8s Job) so scanners never share a pod
 - [ ] Pin base images and actions by digest/SHA
 - [ ] Sealed Secrets / SOPS for in-Git secrets
+
+Not planned: user accounts and billing. SecureShip stays open source and login-free.
 
 ## Author
 
