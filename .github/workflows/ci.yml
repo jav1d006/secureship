@@ -1,84 +1,159 @@
+
 name: ci
+
 on:
   push:
     branches: [main]
   pull_request:
+
 permissions:
   contents: read
-  packages: write
+
 jobs:
   test:
     runs-on: ubuntu-latest
+
     services:
       postgres:
         image: postgres:16-alpine
-        env: {POSTGRES_USER: test, POSTGRES_PASSWORD: test, POSTGRES_DB: test}
-        ports: ["5432:5432"]
+        env:
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: test
+        ports:
+          - "5432:5432"
         options: >-
-          --health-cmd "pg_isready -U test" --health-interval 5s --health-timeout 5s --health-retries 10
+          --health-cmd "pg_isready -U test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
     env:
       TEST_DATABASE_URL: postgresql://test:test@localhost:5432/test
+
     steps:
       - uses: actions/checkout@v7
+
       - uses: actions/setup-python@v7
-        with: {python-version: "3.12"}
-      - run: pip install -r backend/requirements-dev.txt
-      - run: cd backend && ruff check . && pytest -q --cov=app --cov-report=term --cov-fail-under=70
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r backend/requirements-dev.txt
+
+      - name: Lint and test
+        run: |
+          cd backend
+          ruff check .
+          pytest -q --cov=app --cov-report=term --cov-fail-under=70
+
   secrets:
     runs-on: ubuntu-latest
+
     steps:
       - uses: actions/checkout@v7
-        with: {fetch-depth: 0}
-      - uses: gitleaks/gitleaks-action@v3
-        env: {GITHUB_TOKEN: "${{ secrets.GITHUB_TOKEN }}"}
+        with:
+          fetch-depth: 0
+
+      - name: Gitleaks secret scan
+        uses: gitleaks/gitleaks-action@v3
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
   selfscan:
     # SecureShip is scanned with the same kind of checks it offers to users.
     runs-on: ubuntu-latest
+
     steps:
       - uses: actions/checkout@v7
-      - name: Trivy misconfiguration (Kubernetes, Dockerfiles) - blocking
+
+      - name: Trivy misconfiguration scan
         run: |
           docker run --rm -v "$PWD:/src" aquasec/trivy:0.58.0 config \
             --severity HIGH,CRITICAL --exit-code 1 /src
-      - name: Trivy dependencies and secrets - blocking
+
+      - name: Trivy dependency and secret scan
         run: |
           docker run --rm -v "$PWD:/src" aquasec/trivy:0.58.0 fs \
-            --scanners vuln,secret --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 /src
-      - name: Prometheus rules (lint + unit tests)
+            --scanners vuln,secret \
+            --severity HIGH,CRITICAL \
+            --ignore-unfixed \
+            --exit-code 1 /src
+
+      - name: Prometheus rules validation
         run: |
-          docker run --rm -v "$PWD/monitoring:/m" -w /m --entrypoint promtool prom/prometheus:v2.55.1 check rules rules.yml
-          docker run --rm -v "$PWD/monitoring:/m" -w /m --entrypoint promtool prom/prometheus:v2.55.1 test rules rules_test.yml
+          docker run --rm -v "$PWD/monitoring:/m" -w /m \
+            --entrypoint promtool prom/prometheus:v2.55.1 \
+            check rules rules.yml
+
+          docker run --rm -v "$PWD/monitoring:/m" -w /m \
+            --entrypoint promtool prom/prometheus:v2.55.1 \
+            test rules rules_test.yml
+
       - name: Checkov (informational)
         run: |
-          docker run --rm -v "$PWD:/src" bridgecrew/checkov:3.4.0 -d /src \
-            --framework kubernetes,dockerfile,github_actions --quiet --compact --soft-fail
+          docker run --rm -v "$PWD:/src" bridgecrew/checkov:3.4.0 \
+            -d /src \
+            --framework kubernetes,dockerfile,github_actions \
+            --quiet --compact --soft-fail
+
   image:
     needs: [test, secrets, selfscan]
     runs-on: ubuntu-latest
-    permissions: {contents: read, packages: write, id-token: write}
+
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+
     steps:
       - uses: actions/checkout@v7
-      - uses: docker/build-push-action@v7
-        with: {context: backend, load: true, tags: "secureship-backend:ci"}
-      - name: Trivy scan
+
+      - name: Build backend image
+        uses: docker/build-push-action@v7
+        with:
+          context: backend
+          load: true
+          tags: secureship-backend:ci
+
+      - name: Trivy backend image scan
         run: |
           docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
-            aquasec/trivy:0.58.0 image --severity HIGH,CRITICAL \
-            --ignore-unfixed --skip-files '**/gitleaks' --skip-files '**/trivy' --skip-dirs '**/trivy-cache' --exit-code 1 secureship-backend:ci
-      - name: SBOM (CycloneDX)
+            aquasec/trivy:0.58.0 image \
+            --severity HIGH,CRITICAL \
+            --ignore-unfixed \
+            --skip-files '**/gitleaks' \
+            --skip-files '**/trivy' \
+            --skip-dirs '**/trivy-cache' \
+            --exit-code 1 secureship-backend:ci
+
+      - name: Generate backend SBOM
         run: |
-          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "$PWD:/out" \
-            aquasec/trivy:0.58.0 image --format cyclonedx --output /out/sbom-backend.cdx.json secureship-backend:ci
-      - uses: actions/upload-artifact@v7
-        with: {name: sbom-backend, path: sbom-backend.cdx.json}
-      - if: github.ref == 'refs/heads/main'
+          docker run --rm \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            -v "$PWD:/out" \
+            aquasec/trivy:0.58.0 image \
+            --format cyclonedx \
+            --output /out/sbom-backend.cdx.json \
+            secureship-backend:ci
+
+      - name: Upload backend SBOM
+        uses: actions/upload-artifact@v7
+        with:
+          name: sbom-backend
+          path: sbom-backend.cdx.json
+
+      - name: Login to GHCR
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - id: push
-        if: github.ref == 'refs/heads/main'
+
+      - name: Push backend image
+        id: push
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: docker/build-push-action@v7
         with:
           context: backend
@@ -86,38 +161,69 @@ jobs:
           tags: |
             ghcr.io/jav1d006/secureship-backend:latest
             ghcr.io/jav1d006/secureship-backend:${{ github.sha }}
-      - if: github.ref == 'refs/heads/main'
-        uses: sigstore/cosign-installer@v3
-      - name: Sign image (keyless)
-        if: github.ref == 'refs/heads/main'
+
+      - name: Install Cosign
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: sigstore/cosign-installer@v4.0.0
+
+      - name: Sign backend image
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: cosign sign --yes ghcr.io/jav1d006/secureship-backend@${{ steps.push.outputs.digest }}
+
   frontend:
     needs: [selfscan]
     runs-on: ubuntu-latest
-    permissions: {contents: read, packages: write, id-token: write}
+
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+
     steps:
       - uses: actions/checkout@v7
-      - uses: docker/build-push-action@v7
-        with: {context: frontend, load: true, tags: "secureship-frontend:ci"}
-      - name: Trivy scan
+
+      - name: Build frontend image
+        uses: docker/build-push-action@v7
+        with:
+          context: frontend
+          load: true
+          tags: secureship-frontend:ci
+
+      - name: Trivy frontend image scan
         run: |
           docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
-            aquasec/trivy:0.58.0 image --severity HIGH,CRITICAL \
-            --ignore-unfixed --exit-code 1 secureship-frontend:ci
-      - name: SBOM (CycloneDX)
+            aquasec/trivy:0.58.0 image \
+            --severity HIGH,CRITICAL \
+            --ignore-unfixed \
+            --exit-code 1 secureship-frontend:ci
+
+      - name: Generate frontend SBOM
         run: |
-          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "$PWD:/out" \
-            aquasec/trivy:0.58.0 image --format cyclonedx --output /out/sbom-frontend.cdx.json secureship-frontend:ci
-      - uses: actions/upload-artifact@v7
-        with: {name: sbom-frontend, path: sbom-frontend.cdx.json}
-      - if: github.ref == 'refs/heads/main'
+          docker run --rm \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            -v "$PWD:/out" \
+            aquasec/trivy:0.58.0 image \
+            --format cyclonedx \
+            --output /out/sbom-frontend.cdx.json \
+            secureship-frontend:ci
+
+      - name: Upload frontend SBOM
+        uses: actions/upload-artifact@v7
+        with:
+          name: sbom-frontend
+          path: sbom-frontend.cdx.json
+
+      - name: Login to GHCR
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - id: push
-        if: github.ref == 'refs/heads/main'
+
+      - name: Push frontend image
+        id: push
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: docker/build-push-action@v7
         with:
           context: frontend
@@ -125,8 +231,11 @@ jobs:
           tags: |
             ghcr.io/jav1d006/secureship-frontend:latest
             ghcr.io/jav1d006/secureship-frontend:${{ github.sha }}
-      - if: github.ref == 'refs/heads/main'
-        uses: sigstore/cosign-installer@v3
-      - name: Sign image (keyless)
-        if: github.ref == 'refs/heads/main'
+
+      - name: Install Cosign
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: sigstore/cosign-installer@v4.0.0
+
+      - name: Sign frontend image
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: cosign sign --yes ghcr.io/jav1d006/secureship-frontend@${{ steps.push.outputs.digest }}
