@@ -164,7 +164,7 @@ jobs:
 
       - name: Install Cosign
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        uses: sigstore/cosign-installer@v4.0.0
+        uses: sigstore/cosign-installer@v4.1.3
 
       - name: Sign backend image
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -234,7 +234,7 @@ jobs:
 
       - name: Install Cosign
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        uses: sigstore/cosign-installer@v4.0.0
+        uses: sigstore/cosign-installer@v4.1.3
 
       - name: Sign frontend image
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
