@@ -1,5 +1,5 @@
 # ---- tools stage: everything that needs curl / pip downloads; none of it ships in the final image
-FROM python:3.12-slim AS tools
+FROM python:3.15-slim AS tools
 ARG GITLEAKS_VERSION=8.28.0
 ARG GITLEAKS_SHA256=a65b5253807a68ac0cafa4414031fd740aeb55f54fb7e55f386acb52e6a840eb
 RUN apt-get update \
@@ -21,7 +21,7 @@ RUN trivy image --download-db-only --cache-dir /opt/trivy-cache \
     && chmod -R a+rX /opt
 
 # ---- runtime stage
-FROM python:3.12-slim
+FROM python:3.15-slim
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 DATA_DIR=/data
 WORKDIR /srv
 RUN apt-get update \
